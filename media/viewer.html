@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src data:; style-src __CSP__ 'unsafe-inline'; script-src __CSP__ 'nonce-__NONCE__'; worker-src blob:;"
+    />
+    <title>FF Git Image</title>
+    <link rel="stylesheet" href="__STYLE__" />
+  </head>
+  <body>
+    <header>
+      <strong><span class="logo">FF</span> Git Image</strong
+      ><span id="summary">Image changes</span
+      ><button id="show-sidebar" title="Show FF Git Image sidebar">
+        Images</button
+      ><button id="refresh" title="Refresh Git status">↻ Refresh</button>
+    </header>
+    <main>
+      <section class="review" aria-label="Image comparison">
+        <div class="detail">
+          <div>
+            <h1 id="filename">Image changes, in focus.</h1>
+            <p id="context">Choose an image in the FF Git Image sidebar.</p>
+          </div>
+          <div class="file-actions" aria-label="Current image actions">
+            <button id="previous" disabled title="Previous image (←)">←</button>
+            <button id="next" disabled title="Next image (→)">→</button>
+            <button id="stage" disabled>Stage</button>
+            <button id="discard" disabled>Discard…</button>
+            <button id="ignore" disabled>Ignore</button>
+            <button id="open" disabled title="Open the new version">
+              Open image ↗
+            </button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <label
+            >View
+            <select id="mode">
+              <option value="side">Side by side</option>
+              <option value="swipe">Swipe</option>
+              <option value="overlay">Overlay</option>
+              <option value="diff">Pixel diff</option>
+              <option value="blink">Blink</option>
+              <option value="before">Before</option>
+              <option value="after">After</option>
+            </select></label
+          >
+          <label id="mix-control" hidden
+            ><span id="mix-label">Position</span
+            ><input
+              id="mix"
+              type="range"
+              min="0"
+              max="100"
+              value="50"
+              aria-label="Mix percentage"
+            /><output id="mix-value">50%</output></label
+          >
+          <label id="highlight-control"
+            ><input id="highlight" type="checkbox" />Highlight changes</label
+          >
+          <label id="strength-control" hidden
+            >Intensity
+            <input
+              id="strength"
+              type="range"
+              min="10"
+              max="100"
+              value="60"
+              aria-label="Highlight intensity"
+            />
+          </label>
+          <label
+            id="tolerance-control"
+            title="Move left to detect every difference. Move right to ignore larger differences in color and transparency. Applies to this comparison; tree percentages always use Exact."
+            >Color threshold
+            <span class="tolerance-slider">
+              <input
+                id="tolerance"
+                type="range"
+                value="0"
+                min="0"
+                max="255"
+                step="1"
+                aria-label="Color difference threshold"
+              />
+              <span class="tolerance-scale" aria-hidden="true"
+                ><span>Exact</span><span>Ignore more</span></span
+              >
+            </span>
+            <output id="tolerance-value" for="tolerance" aria-hidden="true"
+              >0</output
+            >
+          </label>
+        </div>
+        <div class="zoom-toolbar">
+          <label
+            id="logical-scaling-control"
+            title="Display both images at equal width, with original proportions and top alignment. Uncheck to compare their original pixel sizes."
+            ><input id="logical-scaling" type="checkbox" />Logical
+            scaling</label
+          >
+          <button id="fit">Fit</button><button id="fit-width">Width</button
+          ><button id="actual">1:1</button
+          ><button id="changes">Fit changes</button>
+          <button id="zoom-out" aria-label="Zoom out">−</button
+          ><label class="zoom-value"
+            ><input
+              id="zoom-percent"
+              type="number"
+              min="1"
+              max="1600"
+              value="100"
+              aria-label="Zoom percent"
+            /><output id="zoom">%</output></label
+          ><button id="zoom-in" aria-label="Zoom in">+</button>
+          <label
+            >Background
+            <select id="background">
+              <option value="checker">Checker</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select></label
+          >
+          <span class="hint"
+            >Drag to pan · Ctrl/⌘ + scroll · Double-click for 100%</span
+          >
+        </div>
+        <div id="notice" role="status" hidden></div>
+        <div id="viewer">
+          <div id="empty">
+            <span class="empty-icon">◫</span><strong>No image selected</strong>
+            <p>PNG, JPEG, WebP, GIF, BMP, SVG, ICO and AVIF</p>
+          </div>
+          <div id="panes" hidden>
+            <section class="pane">
+              <div class="pane-heading">
+                <span id="left-label">Before</span><span id="left-size"></span>
+              </div>
+              <div class="viewport" id="left-viewport">
+                <div class="surface"><canvas id="left-canvas"></canvas></div>
+              </div>
+            </section>
+            <section class="pane" id="right-pane">
+              <div class="pane-heading">
+                <span id="right-label">After</span><span id="right-size"></span>
+              </div>
+              <div class="viewport" id="right-viewport">
+                <div class="surface"><canvas id="right-canvas"></canvas></div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <footer>
+          <span id="metrics" role="status"
+            >Select a changed image to begin.</span
+          ><span id="position"></span>
+        </footer>
+      </section>
+    </main>
+    <script type="module" nonce="__NONCE__" src="__SCRIPT__"></script>
+  </body>
+</html>

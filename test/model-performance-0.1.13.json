@@ -1,0 +1,22 @@
+{
+  "vscode": "1.135.0",
+  "files": 32,
+  "bytesPerImage": 262548,
+  "warm": {
+    "reads": 0,
+    "bytes": 0,
+    "snapshots": 0,
+    "statistics": 0,
+    "treeRefreshes": 0,
+    "decorations": 4,
+    "elapsedMs": 2234.524125
+  },
+  "edited": {
+    "reads": 1,
+    "bytes": 262548,
+    "snapshots": 1,
+    "statistics": 1,
+    "treeRefreshes": 0,
+    "decorations": 2
+  }
+}

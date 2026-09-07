@@ -1,0 +1,247 @@
+{
+  "name": "ff-git-image",
+  "displayName": "[FF] Git Image",
+  "icon": "logo.png",
+  "description": "Review image changes in a VS Code tab: side by side, swipe, overlay, blink and pixel diff.",
+  "version": "1.0.0",
+  "publisher": "gornivv",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "SCM Providers"
+  ],
+  "keywords": [
+    "git",
+    "image",
+    "diff",
+    "png",
+    "svg",
+    "golden"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asodevapp/ff_git_image"
+  },
+  "bugs": {
+    "url": "https://github.com/asodevapp/ff_git_image/issues"
+  },
+  "homepage": "https://github.com/asodevapp/ff_git_image#readme",
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onWebviewPanel:ff_git_image.review",
+    "onView:ff_git_image.changes"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ff_git_image.open",
+        "title": "[FF] Git Image: Open Image Changes",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "ff_git_image.openFile",
+        "title": "[FF] Git Image: Compare Image Changes",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "ff_git_image.refresh",
+        "title": "[FF] Git Image: Refresh Image Changes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ff_git_image.findImage",
+        "title": "[FF] Git Image: Find Changed Image",
+        "icon": "$(search)"
+      },
+      {
+        "command": "ff_git_image.stage",
+        "title": "[FF] Git Image: Accept Image Changes (Stage)",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ff_git_image.unstage",
+        "title": "[FF] Git Image: Unstage Image Changes",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "ff_git_image.discard",
+        "title": "[FF] Git Image: Discard Image Changes\u2026",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "ff_git_image.ignore",
+        "title": "[FF] Git Image: Ignore Images",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "ff_git_image.unignore",
+        "title": "[FF] Git Image: Stop Ignoring Images",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "ff_git_image.showIgnored",
+        "title": "[FF] Git Image: Show Ignored Images",
+        "icon": "$(eye)",
+        "enablement": "view == ff_git_image.changes",
+        "toggled": "ff_git_image.showIgnored"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "ff_git_image.open",
+          "when": "scmProvider == git",
+          "group": "navigation@5"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "ff_git_image.openFile",
+          "when": "scmProvider == git && resourceExtname =~ /\\.(png|jpe?g|webp|gif|bmp|svg|ico|avif)$/i",
+          "group": "navigation@5"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "ff_git_image.openFile",
+          "when": "!explorerResourceIsFolder && resourceExtname =~ /\\.(png|jpe?g|webp|gif|bmp|svg|ico|avif)$/i",
+          "group": "navigation@5"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "ff_git_image.openFile",
+          "when": "resourceExtname =~ /\\.(png|jpe?g|webp|gif|bmp|svg|ico|avif)$/i",
+          "group": "navigation@5"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "ff_git_image.open",
+          "when": "view == ff_git_image.changes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ff_git_image.refresh",
+          "when": "view == ff_git_image.changes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ff_git_image.findImage",
+          "when": "view == ff_git_image.changes",
+          "group": "navigation@0"
+        },
+        {
+          "command": "ff_git_image.showIgnored",
+          "when": "view == ff_git_image.changes",
+          "group": "visibility@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ff_git_image.stage",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
+          "group": "changes@1"
+        },
+        {
+          "command": "ff_git_image.unstage",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.staged$/",
+          "group": "changes@2"
+        },
+        {
+          "command": "ff_git_image.discard",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
+          "group": "changes@3"
+        },
+        {
+          "command": "ff_git_image.ignore",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict)(\\.pending)?$/",
+          "group": "ignore@1"
+        },
+        {
+          "command": "ff_git_image.unignore",
+          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.(image|folder|group)\\./",
+          "group": "ignore@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ff_git_image.stage",
+          "when": "false"
+        },
+        {
+          "command": "ff_git_image.unstage",
+          "when": "false"
+        },
+        {
+          "command": "ff_git_image.discard",
+          "when": "false"
+        },
+        {
+          "command": "ff_git_image.ignore",
+          "when": "false"
+        },
+        {
+          "command": "ff_git_image.unignore",
+          "when": "false"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ff_git_image",
+          "title": "FF Git Image",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "ff_git_image": [
+        {
+          "id": "ff_git_image.changes",
+          "name": "Image Changes",
+          "contextualTitle": "FF Git Image"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "ff_git_image.changes",
+        "contents": "No changed images found. Open a Git repository and change an image to start comparing. Check .image_ignore for excluded images.\n[Refresh image changes](command:ff_git_image.refresh)\n[Open comparison tab](command:ff_git_image.open)"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "test": "npm run compile && node --test test/*.test.*",
+    "test:host": "npm run compile && node test/run-host.cjs",
+    "test:ui": "node test/ui.mjs",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies --githubBranch main",
+    "test:menu": "npm run compile && node test/menu-ui.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "18.19.130",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "3.9.2",
+    "playwright": "1.55.1",
+    "typescript": "5.9.3"
+  }
+}

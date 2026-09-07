@@ -1,0 +1,15 @@
+.vscode/**
+.github/**
+src/**
+test/**
+scripts/**
+dist/**
+docs/PUBLISHING.md
+node_modules/**
+.test-host/**
+**/*.map
+**/*.ts
+tsconfig.json
+package-lock.json
+.gitignore
+*.vsix
