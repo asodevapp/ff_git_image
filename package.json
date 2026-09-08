@@ -3,7 +3,7 @@
   "displayName": "[FF] Git Image",
   "icon": "logo.png",
   "description": "Review image changes in a VS Code tab: side by side, swipe, overlay, blink and pixel diff.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "gornivv",
   "license": "MIT",
   "engines": {

@@ -36,7 +36,7 @@
             </button>
           </div>
         </div>
-        <div class="toolbar">
+        <div class="toolbar" id="comparison-toolbar">
           <label
             >View
             <select id="mode">
@@ -137,7 +137,7 @@
             <p>PNG, JPEG, WebP, GIF, BMP, SVG, ICO and AVIF</p>
           </div>
           <div id="panes" hidden>
-            <section class="pane">
+            <section class="pane" id="left-pane">
               <div class="pane-heading">
                 <span id="left-label">Before</span><span id="left-size"></span>
               </div>
@@ -147,7 +147,9 @@
             </section>
             <section class="pane" id="right-pane">
               <div class="pane-heading">
-                <span id="right-label">After</span><span id="right-size"></span>
+                <span class="pane-title"><span id="right-label">After</span
+                  ><span id="new-badge" title="New image" hidden>new</span></span
+                ><span id="right-size"></span>
               </div>
               <div class="viewport" id="right-viewport">
                 <div class="surface"><canvas id="right-canvas"></canvas></div>

@@ -241,7 +241,7 @@ input[type="range"] {
   min-width: 0;
   min-height: 0;
 }
-.pane + .pane {
+#panes:not(.single) .pane + .pane {
   border-left: 1px solid var(--line);
 }
 .pane-heading {
@@ -252,6 +252,18 @@ input[type="range"] {
   color: var(--muted);
   font-size: 11px;
   border-bottom: 1px solid var(--line);
+}
+.pane-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#new-badge {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-weight: 600;
 }
 .viewport {
   overflow: auto;

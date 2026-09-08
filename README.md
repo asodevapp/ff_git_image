@@ -117,7 +117,7 @@ Use **Ignore Images** on files, folders, or a multi-selection. The extension app
 | Untracked / intent to add | Not present        | Working tree               |
 | Merge conflict            | HEAD, if available | Working tree, if available |
 
-A partially staged file has **two separate entries**. Renames use the old path for the before version and the new path for the after version. Added and deleted files retain an explicit absent side. Merge conflicts remain marked as conflicts; this extension does not resolve them.
+A partially staged file has **two separate entries**. Renames use the old path for the before version and the new path for the after version. New images open at full width with a **new** badge, without an empty before pane. Zoom, pan, backgrounds, and file actions remain available; comparison controls return with your saved settings when you select a modified image. Deleted files retain an explicit absent after side. Merge conflicts remain marked as conflicts; this extension does not resolve them.
 
 ### Accept or discard a folder
 

@@ -74,6 +74,19 @@ const items = [
     scope: "working",
     status: "Modified",
   },
+  {
+    id: "new-staged",
+    path: "assets/icons/new-staged.svg",
+    scope: "staged",
+    status: "Added",
+  },
+  {
+    id: "conflict-added",
+    path: "assets/icons/conflict.svg",
+    scope: "conflict",
+    status: "Conflict",
+    beforeLabel: "Not present",
+  },
 ].map((item) => ({
   repository: "design-system",
   root: "/workspace/design-system",
@@ -100,6 +113,8 @@ const images = {
   deleted: [old, null],
   error: [{ error: "Index: unavailable" }, fresh],
   unsafe: [old, fresh],
+  "new-staged": [null, fresh],
+  "conflict-added": [null, fresh],
 };
 const server = createServer(async (req, res) => {
   try {
@@ -291,7 +306,13 @@ try {
           ?.id === id,
       id,
     );
-    if (valid) await compared();
+    if (valid) {
+      if (items.find((item) => item.id === id)?.status === "Added")
+        await page.waitForFunction(() =>
+          document.querySelector("#metrics").textContent.includes("New image"),
+        );
+      else await compared();
+    }
   };
   const pixel = (selector) =>
     page
@@ -641,9 +662,12 @@ try {
   await page.waitForFunction(() =>
     document
       .querySelector("#metrics")
-      .textContent.includes("Not present → 720 × 480"),
+      .textContent.includes("720 × 480 · New image"),
   );
   assert.equal(await page.locator("#open").isDisabled(), false);
+  assert.equal(await page.locator("#left-pane").isVisible(), false);
+  assert.equal(await page.locator("#logical-scaling-control").isVisible(), false);
+  assert.equal(await page.evaluate(() => window.__state().logicalScaling), true);
   await selectFromSidebar("resized", false);
   await page.waitForFunction(
     () =>
@@ -683,8 +707,92 @@ try {
   assert.match(await page.locator("#metrics").textContent(), /\(0.00%\)/);
   assert.match(await page.locator("#context").textContent(), /HEAD → Index/);
   await selectFromSidebar("new");
-  assert.match(await page.locator("#metrics").textContent(), /100.00%/);
+  assert.equal(await page.locator("#metrics").textContent(), "720 × 480 · New image");
+  // A new image is always shown in full, even with saved Before/Blink/Diff or
+  // highlight settings. Keep those preferences for the next real comparison.
+  for (const mode of ["side", "before", "after", "swipe", "overlay", "diff", "blink"]) {
+    await selectFromSidebar("main");
+    await page.selectOption("#mode", mode);
+    for (const id of ["new", "new-staged"]) {
+      const workers = await page.evaluate(() => window.__activity.workers);
+      await selectFromSidebar(id);
+      assert.equal(await page.locator("#left-pane").isVisible(), false);
+      assert.equal(await page.locator("#right-pane").isVisible(), true);
+      assert.equal(await page.locator("#new-badge").textContent(), "new");
+      assert.equal(await page.locator("#new-badge").isVisible(), true);
+      assert.equal(await page.locator("#right-label").textContent(), id === "new" ? "Working tree" : "Index");
+      assert.equal(await page.locator("#comparison-toolbar").isVisible(), false);
+      assert.equal(await page.locator("#changes").isVisible(), false);
+      assert.equal(await page.locator("#right-pane").evaluate((pane) => pane.clientWidth), 1440);
+      assert.deepEqual(await pixel("#right-canvas"), [19, 168, 135, 255]);
+      assert.equal(await page.evaluate(() => window.__activity.workers), workers);
+      assert.equal(await page.evaluate(() => window.__state().mode), mode);
+      assert.equal(await page.locator("#stage").isDisabled(), false);
+    }
+    if (mode === "blink") {
+      const activity = await page.evaluate(() => ({ ...window.__activity }));
+      await page.waitForTimeout(750);
+      assert.deepEqual(await page.evaluate(() => window.__activity), activity);
+    }
+  }
+  // Restoring a tab with a new image keeps the saved comparison preference.
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector("#new-badge").checkVisibility());
+  assert.equal(await page.evaluate(() => window.__state().mode), "blink");
+  assert.equal(await page.locator("#left-pane").isVisible(), false);
+  await page.click("#fit");
+  await page.screenshot({ path: path.join(root, ".test-host", "new-image.png") });
+  // Zoom and pan must use the visible right viewport, including pointer anchors.
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.click("#fit");
+  const right = page.locator("#right-canvas");
+  assert.ok((await right.boundingBox()).width < 720);
+  await right.dblclick({ position: { x: 20, y: 20 } });
+  assert.equal(await page.locator("#zoom-percent").inputValue(), "100");
+  await page.locator("#zoom-percent").fill("200");
+  await page.locator("#zoom-percent").press("Tab");
+  assert.equal((await right.boundingBox()).width, 1440);
+  const viewport = page.locator("#right-viewport");
+  await viewport.evaluate((element) => { element.scrollLeft = element.scrollTop = 0; });
+  const rect = await viewport.boundingBox();
+  const anchor = { x: rect.x + 180, y: rect.y + 120 };
+  const sourcePoint = () => right.evaluate((canvas, point) => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (point.x - rect.x) * canvas.width / rect.width, y: (point.y - rect.y) * canvas.height / rect.height };
+  }, anchor);
+  const beforeZoom = await sourcePoint();
+  await viewport.dispatchEvent("wheel", { clientX: anchor.x, clientY: anchor.y, deltaY: -20, ctrlKey: true });
+  const afterZoom = await sourcePoint();
+  assert.ok(Math.abs(beforeZoom.x - afterZoom.x) < 1);
+  assert.ok(Math.abs(beforeZoom.y - afterZoom.y) < 1);
+  const scrollLeft = await viewport.evaluate((element) => element.scrollLeft);
+  await page.mouse.move(anchor.x, anchor.y);
+  await page.mouse.down();
+  await page.mouse.move(anchor.x - 80, anchor.y - 40);
+  await page.mouse.up();
+  assert.ok((await viewport.evaluate((element) => element.scrollLeft)) > scrollLeft + 70);
+  const unchangedNew = await stableView();
+  await page.evaluate(() => window.__revisionSnapshot());
+  assert.deepEqual(await stableView(), unchangedNew);
+  await page.setViewportSize({ width: 600, height: 600 });
+  await page.click("#fit-width");
+  assert.ok(Math.abs((await right.boundingBox()).width - 552) < 1);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.click("#fit");
+  await selectFromSidebar("main");
+  assert.equal(await page.locator("#mode").inputValue(), "blink");
+  assert.equal(await page.locator("#new-badge").isVisible(), false);
+  await page.selectOption("#mode", "side");
+  assert.equal(await page.locator("#left-pane").isVisible(), true);
+  assert.equal(await page.locator("#right-pane").isVisible(), true);
+  assert.equal(await page.locator("#highlight").isChecked(), true);
+  await selectFromSidebar("conflict-added");
+  assert.equal(await page.locator("#new-badge").isVisible(), false);
+  assert.equal(await page.locator("#left-pane").isVisible(), true);
+  assert.match(await page.locator("#notice").textContent(), /Merge conflict/);
   await selectFromSidebar("deleted");
+  assert.equal(await page.locator("#new-badge").isVisible(), false);
+  assert.equal(await page.locator("#left-pane").isVisible(), true);
   assert.equal(await page.locator("#open").isDisabled(), true);
   await selectFromSidebar("error", false);
   await page.waitForFunction(() =>
@@ -696,6 +804,8 @@ try {
     await page.locator("#notice").textContent(),
     /Index: unavailable/,
   );
+  assert.equal(await page.locator("#new-badge").isVisible(), false);
+  assert.equal(await page.locator("#left-pane").isVisible(), true);
   await selectFromSidebar("unsafe");
   assert.equal(await page.locator("#filename img").count(), 0);
   assert.equal(
@@ -951,7 +1061,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: browser UI — queued actions with continued navigation and correlated completions, revision-bound actions, previous/next, numeric zoom, Fit Width, double-click, shortcuts, highlight intensity, background counts without redraw, logical scaling, stable refreshes, all modes and responsive layout.",
+    "PASS: browser UI — full-width new images, saved comparison modes, queued actions with continued navigation and correlated completions, revision-bound actions, previous/next, numeric zoom, Fit Width, double-click, shortcuts, highlight intensity, background counts without redraw, logical scaling, stable refreshes, all modes and responsive layout.",
   );
   if (process.argv.includes("--screenshots")) {
     const { captureReadme } = await import("./readme-ui.mjs");

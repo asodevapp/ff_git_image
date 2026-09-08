@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Show added images at full width with a `new` badge, without an empty before pane or comparison controls. Preserve comparison preferences for modified images, and keep zoom, pan, and file actions available.
+- Skip preview pixel-diff workers and blink timers for new images; background tree statistics remain available.
+
 ## 1.0.0
 
 First public release of FF Git Image: review image changes directly in VS Code, with no runtime npm dependencies or external image tools.

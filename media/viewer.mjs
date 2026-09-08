@@ -11,6 +11,7 @@ let request = 0,
   before = null,
   after = null,
   loaded = false,
+  newImage = false,
   diff = null,
   mask = null,
   bounds = null;
@@ -37,7 +38,8 @@ const surfaces = viewports.map((viewport) =>
   viewport.querySelector(".surface"),
 );
 const isLogicalScaling = () =>
-  $("mode").value === "side" && $("logical-scaling").checked;
+  !newImage && $("mode").value === "side" && $("logical-scaling").checked;
+const primaryIndex = () => (newImage ? 1 : 0);
 const current = () => items.find((item) => item.id === activeId);
 const dimensions = (image) =>
   image ? `${image.width} × ${image.height}` : "Not present";
@@ -100,6 +102,7 @@ function clear(resetCanvases = true) {
   before = after = diff = mask = bounds = null;
   rawMetrics = "";
   loaded = false;
+  newImage = false;
   revision = undefined;
   $("changes").disabled = true;
   for (const canvas of resetCanvases ? canvases : []) {
@@ -246,6 +249,13 @@ window.addEventListener("message", async (event) => {
       return;
     }
     loaded = true;
+    // Only an explicitly added, readable image has no before pane. A failed
+    // before decode or a merge conflict must keep the comparison and its notice.
+    newImage =
+      comparisonValid &&
+      current()?.status === "Added" &&
+      current()?.beforeLabel === "Not present" &&
+      !before && !!after;
     $("empty").hidden = true;
     $("panes").hidden = false;
     rawMetrics = comparisonValid
@@ -255,7 +265,7 @@ window.addEventListener("message", async (event) => {
     startBlink();
     vscode.postMessage({ type: "viewed", id: activeId, revision });
     updateActions();
-    if (comparisonValid && !isLogicalScaling()) calculate();
+    if (comparisonValid && !isLogicalScaling() && !newImage) calculate();
   } else if (data.type === "error") notice(data.message);
 });
 
@@ -271,7 +281,7 @@ function calculate() {
   cancelDiff();
   diff = mask = bounds = null;
   $("changes").disabled = true;
-  if (!loaded || !comparisonValid || isLogicalScaling()) return;
+  if (!loaded || !comparisonValid || isLogicalScaling() || newImage) return;
   rawMetrics = "Comparing pixels…";
   $("metrics").textContent = rawMetrics;
   const tolerance = Math.max(
@@ -352,8 +362,10 @@ function geometry() {
 function render() {
   const mode = $("mode").value,
     layout = isLogicalScaling(),
-    side = mode === "side",
+    side = mode === "side" && !newImage,
     mix = Number($("mix").value) / 100;
+  $("comparison-toolbar").hidden = newImage;
+  $("new-badge").hidden = !newImage;
   $("mix-control").hidden = !["swipe", "overlay"].includes(mode);
   $("mix-label").textContent = mode === "swipe" ? "Position" : "Opacity";
   $("mix-value").textContent = `${Math.round(mix * 100)}%`;
@@ -362,7 +374,7 @@ function render() {
   $("strength-control").hidden =
     $("highlight-control").hidden || !$("highlight").checked;
   $("tolerance-control").hidden = layout;
-  $("changes").hidden = layout;
+  $("changes").hidden = layout || newImage;
   $("actual").textContent = layout ? "100%" : "1:1";
   $("actual").title = layout
     ? "Use the smaller image's width for both versions"
@@ -372,10 +384,12 @@ function render() {
     : "Image zoom";
   $("panes").classList.toggle("single", !side);
   $("panes").classList.toggle("layout", layout);
-  $("right-pane").hidden = !side;
+  $("left-pane").hidden = newImage;
+  $("right-pane").hidden = !side && !newImage;
   if (!loaded) return;
   const view = geometry();
   const item = current();
+  const viewport = viewports[primaryIndex()];
   const label =
     side || mode === "before"
       ? item.beforeLabel
@@ -407,12 +421,12 @@ function render() {
         Math.min(
           ((layout
             ? Math.min(...viewports.map((viewport) => viewport.clientWidth))
-            : viewports[0].clientWidth) -
+            : viewport.clientWidth) -
             48) /
             view.width,
           zoomMode === "width"
             ? 16
-            : (viewports[0].clientHeight - 48) / view.height,
+            : (viewport.clientHeight - 48) / view.height,
         ),
       ),
     );
@@ -426,6 +440,8 @@ function render() {
       `${dimensions(after)}${after ? ` · ${sourceZoom(1)}` : ""}`;
     $("metrics").textContent =
       `Logical scaling · Equal width, original proportions · ${dimensions(before)} → ${dimensions(after)}${comparisonValid ? "" : " · One version unavailable"}`;
+  } else if (newImage) {
+    $("metrics").textContent = `${dimensions(after)} · New image`;
   } else {
     $("metrics").textContent = rawMetrics;
   }
@@ -446,7 +462,7 @@ function render() {
     }
   };
   for (const [index, canvas] of canvases.entries()) {
-    if (index === 1 && !side) continue;
+    if (newImage ? index === 0 : index === 1 && !side) continue;
     const image = index ? after : before;
     const canvasWidth = layout ? (image?.width ?? view.width) : width;
     const canvasHeight = layout
@@ -460,7 +476,9 @@ function render() {
     canvas.classList.toggle("pixelated", !layout && scale >= 2);
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, width, height);
-    if (side) {
+    if (newImage) {
+      draw(ctx, after);
+    } else if (side) {
       draw(ctx, index ? after : before);
       if (index && !layout) highlight(ctx);
     } else if (mode === "before" || mode === "after" || mode === "blink") {
@@ -494,8 +512,9 @@ function render() {
 
 function zoom(next, clientX, clientY) {
   if (!loaded) return;
-  const viewport = viewports[0],
-    rect = canvases[0].getBoundingClientRect(),
+  const index = primaryIndex();
+  const viewport = viewports[index],
+    rect = canvases[index].getBoundingClientRect(),
     viewportRect = viewport.getBoundingClientRect();
   const x = clientX ?? viewportRect.left + viewport.clientWidth / 2,
     y = clientY ?? viewportRect.top + viewport.clientHeight / 2;
@@ -504,16 +523,16 @@ function zoom(next, clientX, clientY) {
   scale = Math.max(0.01, Math.min(16, next));
   zoomMode = "manual";
   render();
-  const updated = canvases[0].getBoundingClientRect();
+  const updated = canvases[index].getBoundingClientRect();
   viewport.scrollLeft += updated.left + imageX * scale - x;
   viewport.scrollTop += updated.top + imageY * scale - y;
   synchronize(viewport);
 }
 function synchronize(source) {
-  if (syncing) return;
+  if (syncing || source.closest(".pane").hidden) return;
   syncing = true;
   for (const viewport of viewports)
-    if (viewport !== source) {
+    if (viewport !== source && !viewport.closest(".pane").hidden) {
       viewport.scrollLeft = source.scrollLeft;
       viewport.scrollTop = source.scrollTop;
     }
@@ -522,7 +541,7 @@ function synchronize(source) {
 function startBlink() {
   clearInterval(blinkTimer);
   blinkTimer = undefined;
-  if (loaded && $("mode").value === "blink" && !document.hidden)
+  if (loaded && !newImage && $("mode").value === "blink" && !document.hidden)
     blinkTimer = setInterval(() => {
       blinkAfter = !blinkAfter;
       render();
@@ -546,7 +565,7 @@ for (const viewport of viewports) {
       render();
     } else {
       const rect = viewport.getBoundingClientRect(),
-        left = viewports[0].getBoundingClientRect();
+        left = viewports[primaryIndex()].getBoundingClientRect();
       zoom(1, left.left + event.clientX - rect.left, event.clientY);
     }
   });
@@ -556,7 +575,7 @@ for (const viewport of viewports) {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
       const rect = viewport.getBoundingClientRect(),
-        left = viewports[0].getBoundingClientRect();
+        left = viewports[primaryIndex()].getBoundingClientRect();
       zoom(
         scale * Math.exp(-event.deltaY * 0.008),
         left.left + event.clientX - rect.left,
@@ -569,6 +588,7 @@ for (const viewport of viewports) {
     if (event.button !== 0 || !loaded) return;
     const rect = canvases[0].getBoundingClientRect();
     const swipe =
+      !newImage &&
       $("mode").value === "swipe" &&
       Math.abs(
         event.clientX -
@@ -628,7 +648,10 @@ function changeMode() {
   if (isLogicalScaling()) cancelDiff();
   render();
   startBlink();
-  if (loaded && comparisonValid && !isLogicalScaling() && !diff && !worker)
+  if (
+    loaded && comparisonValid && !isLogicalScaling() &&
+    !newImage && !diff && !worker
+  )
     calculate();
   save();
 }
