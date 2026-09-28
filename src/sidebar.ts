@@ -574,6 +574,20 @@ export class ImageChangesTree
     if (failure?.status === "rejected") throw failure.reason;
   }
 
+  actionChanges(repo: Repository): ImageChange[] {
+    const git = this.ignores
+      ? this.ignores.changes(repo, true)
+      : collectChanges(repo);
+    if (!this.failures) return git;
+    const artifacts = this.failures.changes(repo);
+    return [
+      ...git,
+      ...(this.ignores
+        ? this.ignores.filter(repo, artifacts, true)
+        : artifacts),
+    ];
+  }
+
   private changes(repo: Repository): ImageChange[] {
     const git = this.ignores
       ? this.ignores.changes(repo)

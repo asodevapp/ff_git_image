@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Restore Delete and Ignore actions for failure images, folders, and the Failures group in the tree and context menu, plus Delete / Ignore / Stop ignoring in the preview. Selected cleanup uses the existing queue, revision checks, and Trash.
+- Keep bulk cleanup and discard confirmations compact, showing three path examples and the remaining count. View File List opens the complete list in a scrollable editor without approving deletion.
+
 ## 1.1.0
 
 - Highlight failure files, folders, group icons, and the preview badge in the theme's red error color.

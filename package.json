@@ -3,7 +3,7 @@
   "displayName": "[FF] Git Image",
   "icon": "logo.png",
   "description": "Review image changes in a VS Code tab: side by side, swipe, overlay, blink and pixel diff.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "gornivv",
   "license": "MIT",
   "engines": {
@@ -109,6 +109,11 @@
         "command": "ff_git_image.deleteFailures",
         "title": "[FF] Git Image: Delete All Failure Images…",
         "icon": "$(trash)"
+      },
+      {
+        "command": "ff_git_image.deleteSelectedFailures",
+        "title": "[FF] Git Image: Delete Selected Failure Images…",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -174,6 +179,16 @@
       ],
       "view/item/context": [
         {
+          "command": "ff_git_image.deleteSelectedFailures",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.failure(\\.ignored)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "ff_git_image.deleteSelectedFailures",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.failure(\\.ignored)?$/",
+          "group": "changes@3"
+        },
+        {
           "command": "ff_git_image.discard",
           "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
           "group": "inline@1"
@@ -205,13 +220,23 @@
         },
         {
           "command": "ff_git_image.ignore",
-          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict)(\\.pending)?$/",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict|failure)(\\.pending)?$/",
           "group": "ignore@1"
         },
         {
           "command": "ff_git_image.unignore",
-          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict)(\\.|$)/",
+          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict|failure)(\\.|$)/",
           "group": "ignore@2"
+        },
+        {
+          "command": "ff_git_image.ignore",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.failure$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "ff_git_image.unignore",
+          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.image\\.failure\\.ignored$/",
+          "group": "inline@2"
         }
       ],
       "commandPalette": [
@@ -233,6 +258,10 @@
         },
         {
           "command": "ff_git_image.unignore",
+          "when": "false"
+        },
+        {
+          "command": "ff_git_image.deleteSelectedFailures",
           "when": "false"
         }
       ]

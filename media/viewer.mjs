@@ -756,8 +756,8 @@ $("open").addEventListener("click", () =>
 function updateActions() {
   const item = current(),
     index = items.findIndex((item) => item.id === activeId);
-  for (const id of ["stage", "discard", "ignore"])
-    $(id).hidden = item?.scope === "failure";
+  const failure = item?.scope === "failure";
+  $("stage").hidden = failure;
   const actionBusy = [...pendingActions.values()].includes(activeId);
   const ready = loaded && comparisonValid && !!revision && !actionBusy;
   $("previous").disabled = index <= 0;
@@ -768,8 +768,9 @@ function updateActions() {
     !item ||
     item.ignored ||
     ["conflict", "failure"].includes(item.scope);
+  $("discard").textContent = failure ? "Delete…" : "Discard…";
   $("discard").disabled =
-    !ready || !item || item.ignored || item.scope !== "working";
+    !ready || !item || (!failure && (item.ignored || item.scope !== "working"));
   $("ignore").textContent = item?.ignored ? "Stop ignoring" : "Ignore";
   $("ignore").disabled = !revision || !item || actionBusy;
 }
@@ -784,7 +785,8 @@ function act(action) {
   if (
     !revision ||
     !current() ||
-    current().scope === "failure" ||
+    (current().scope === "failure" &&
+      !["deleteFailure", "ignore", "unignore"].includes(action)) ||
     [...pendingActions.values()].includes(activeId)
   )
     return;
@@ -804,7 +806,9 @@ $("next").addEventListener("click", () => step(1));
 $("stage").addEventListener("click", () =>
   act(current()?.scope === "staged" ? "unstage" : "stage"),
 );
-$("discard").addEventListener("click", () => act("discard"));
+$("discard").addEventListener("click", () =>
+  act(current()?.scope === "failure" ? "deleteFailure" : "discard"),
+);
 $("ignore").addEventListener("click", () =>
   act(current()?.ignored ? "unignore" : "ignore"),
 );

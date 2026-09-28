@@ -87,6 +87,7 @@ const {
   isFailurePath,
 } = require("../out/failures");
 const { ImageActionQueue } = require("../out/action-queue");
+const { comparisonRevision } = require("../out/images");
 Module._load = load;
 
 function put(name, bytes = "png", type = 1) {
@@ -114,6 +115,35 @@ function setup(t, roots = ["/repo"]) {
   t.after(() => artifacts.dispose());
   return { artifacts, api };
 }
+
+test("selected cleanup rejects changed preview bytes even when file metadata is preserved", async (t) => {
+  const { artifacts, api } = setup(t);
+  const file = "/repo/failures/image.png";
+  put(file, "old");
+  await artifacts.refresh();
+  const change = artifacts.changes(api.repositories[0])[0];
+  const revision = comparisonRevision(null, {
+    data: Buffer.from("old"),
+    mime: "image/png",
+  });
+  const selected = artifacts.select([{ ...change, revision }]);
+  put(file, "new");
+  let confirmed = false;
+  await assert.rejects(
+    artifacts.clean(
+      selected,
+      () => {},
+      async () => {
+        confirmed = true;
+        return true;
+      },
+    ),
+    /changed since it was viewed/,
+  );
+  assert.equal(confirmed, false);
+  assert.equal(calls.filter((call) => call[0] === "delete").length, 0);
+  assert.equal(entries.get(file).bytes.toString(), "new");
+});
 
 test("scan finds ignored failure images as separate cached rows, skips symlinks and dependency folders", async (t) => {
   const { artifacts, api } = setup(t);
@@ -339,4 +369,48 @@ test("failure cleanup shares FIFO order and duplicate pending tasks", async (t) 
   release(1);
   assert.equal(await first.result, 1);
   assert.equal(await second.result, 1);
+});
+
+test("selected failure cleanup deduplicates descendants and preserves other folders", async (t) => {
+  const { artifacts, api } = setup(t);
+  put("/repo/test/one/failures/a.png");
+  put("/repo/test/one/failures/nested/b.png");
+  put("/repo/test/one/failures-extra/c.png");
+  put("/repo/test/two/failures/d.png");
+  await artifacts.refresh();
+  const changes = artifacts
+    .changes(api.repositories[0])
+    .filter((change) => change.path.startsWith("test/one/"));
+  const selected = artifacts.select([
+    ...changes,
+    ...changes,
+    { scope: "working", path: "unrelated.png" },
+  ]);
+  assert.equal(selected.length, 2);
+  assert.equal(
+    await artifacts.clean(
+      selected,
+      () => {},
+      async () => true,
+    ),
+    2,
+  );
+  assert(entries.has("/repo/test/two/failures/d.png"));
+  assert(entries.has("/repo/test/one/failures-extra/c.png"));
+  assert.equal(
+    artifacts.select([]).length,
+    0,
+    "Empty selection never means delete all",
+  );
+  assert.throws(
+    () => artifacts.select(changes),
+    /Selected failure images changed/,
+  );
+  assert.throws(
+    () =>
+      artifacts.select([
+        { ...artifacts.changes(api.repositories[0])[0], path: "../fake.png" },
+      ]),
+    /Selected failure images changed/,
+  );
 });

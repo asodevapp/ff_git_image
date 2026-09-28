@@ -87,6 +87,20 @@ exports.run = async () => {
             );
             return undefined;
           }
+          if (
+            options?.modal &&
+            /^Move \d+ failure images to Trash\?$/.test(message)
+          ) {
+            const all = message === "Move 81 failure images to Trash?";
+            fs.writeFileSync(
+              path.join(
+                process.env.FF_GIT_IMAGE_MENU_CONTROL,
+                all ? "failureListRequested" : "failureCleanupCancelled",
+              ),
+              JSON.stringify({ message, options, buttons }),
+            );
+            return all ? "View File List" : undefined;
+          }
           return target.showWarningMessage(message, options, ...buttons);
         };
       if (key === "createTreeView")
@@ -280,6 +294,63 @@ exports.run = async () => {
         index === 0 ? png(789) : after,
         "Cancelled inline discard preserves working images",
       );
+    const tiny = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jrGQAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const artifacts = [
+      ...Array.from(
+        { length: 80 },
+        (_, i) =>
+          `test/screen/failures/cleanup/screen${String(i).padStart(3, "0")}_testImage.png`,
+      ),
+      "test/screen/failures/keep/other_testImage.png",
+    ];
+    for (const file of artifacts) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), tiny);
+    }
+    sidebar.setFilter("failures");
+    await until(
+      () => sidebar.leaves().length === artifacts.length,
+      "failure artifacts discovered",
+    );
+    const artifactNode = sidebar.findFile(
+      vscode.Uri.file(path.join(root, artifacts[0])),
+      "failure",
+    );
+    await tree.reveal(artifactNode, { select: true, focus: true });
+    fs.writeFileSync(path.join(control, "failureReady"), "yes");
+    await until(
+      () => fs.existsSync(path.join(control, "failureActionsChecked")),
+      "failure actions checked",
+      90000,
+    );
+    await until(
+      () =>
+        vscode.workspace.textDocuments.some((document) =>
+          document
+            .getText()
+            .includes(
+              "Review this list, then run the action again to confirm.",
+            ),
+        ),
+      "full failure list opened",
+    );
+    const list = vscode.workspace.textDocuments.find((document) =>
+      document
+        .getText()
+        .includes("Review this list, then run the action again to confirm."),
+    );
+    assert.equal(list.languageId, "plaintext");
+    for (const file of artifacts) {
+      assert.ok(list.getText().includes(JSON.stringify(path.join(root, file))));
+      assert.deepEqual(
+        fs.readFileSync(path.join(root, file)),
+        tiny,
+        "Cancel and View File List preserve all failure images",
+      );
+    }
   }
   const report = {
     vscode: vscode.version,

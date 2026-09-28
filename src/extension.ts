@@ -9,10 +9,15 @@ import {
   sidebarViewId,
 } from "./sidebar";
 import { ImageIgnore } from "./image-ignore";
-import { ImageAction, ImageActions } from "./actions";
+import { ImageAction, ImageActions, leaves } from "./actions";
 import { ImageStatistics } from "./statistics";
 import { ImageActionTask } from "./action-queue";
-import { FailureArtifacts, ImageFilter, imageFilters } from "./failures";
+import {
+  FailureArtifacts,
+  FailureFile,
+  ImageFilter,
+  imageFilters,
+} from "./failures";
 
 const viewType = "ff_git_image.review";
 
@@ -217,14 +222,28 @@ class Review implements vscode.Disposable {
         if (
           typeof data.id !== "string" ||
           !Number.isSafeInteger(data.request) ||
-          !["stage", "unstage", "discard", "ignore", "unignore"].includes(
-            String(data.action),
-          )
+          ![
+            "stage",
+            "unstage",
+            "discard",
+            "ignore",
+            "unignore",
+            "deleteFailure",
+          ].includes(String(data.action))
         )
           return;
         try {
           const change = this.changes.get(data.id);
-          if (!change || change.scope === "failure") return;
+          if (!change) return;
+          if (
+            change.scope === "failure" &&
+            !["ignore", "unignore", "deleteFailure"].includes(
+              String(data.action),
+            )
+          )
+            return;
+          if (data.action === "deleteFailure" && change.scope !== "failure")
+            return;
           if (
             typeof data.revision !== "string" ||
             this.viewed.get(change.id) !== data.revision
@@ -236,7 +255,13 @@ class Review implements vscode.Disposable {
           }
           const item = new ImageTreeItem(change.path);
           item.change = { ...change, revision: data.revision };
-          await this.runAction(data.action as ImageAction, [item]);
+          if (data.action === "deleteFailure")
+            await vscode.commands.executeCommand(
+              "ff_git_image.deleteSelectedFailures",
+              item,
+              [item],
+            );
+          else await this.runAction(data.action as ImageAction, [item]);
         } finally {
           this.snapshot();
           void this.panel.webview.postMessage({
@@ -517,6 +542,55 @@ export async function activate(context: vscode.ExtensionContext) {
     commands.set(task, completion);
     return completion;
   };
+  const cleanupFailures = async (files: readonly FailureFile[]) => {
+    if (!files.length) {
+      void vscode.window.showInformationMessage(
+        failures.scanning
+          ? "Scanning failure images. Try again when the scan completes."
+          : "No failure images to delete.",
+      );
+      return;
+    }
+    const key = JSON.stringify([
+      "deleteFailures",
+      files.map((file) => [
+        file.uri.toString(),
+        file.size,
+        file.mtime,
+        file.ctime,
+        file.revision,
+      ]),
+    ]);
+    const task = actions.queue.enqueue(
+      key,
+      `Delete ${files.length} failure images`,
+      async (report) => {
+        const paused = sidebar.pauseBackgroundChecks();
+        try {
+          return await failures.clean(files, report);
+        } finally {
+          try {
+            await sidebar.refresh(
+              [],
+              api.repositories.filter((repo) =>
+                files.some(
+                  (file) => file.root.toString() === repo.rootUri.toString(),
+                ),
+              ),
+            );
+          } finally {
+            paused.dispose();
+          }
+        }
+      },
+    );
+    await finishTask(task, "Moved failures to Trash");
+  };
+  const selectedTreeNodes = (input: unknown, selection?: ImageTreeItem[]) => {
+    if (!(input instanceof ImageTreeItem)) return [];
+    const selected = selection ?? [...tree.selection];
+    return selected.some((node) => node.id === input.id) ? selected : [input];
+  };
   const runAction = async (action: ImageAction, nodes: ImageTreeItem[]) => {
     try {
       const task = actions.enqueue(action, nodes);
@@ -607,62 +681,31 @@ export async function activate(context: vscode.ExtensionContext) {
       updateBadge();
       await context.workspaceState.update("imageFilter", selected.filter);
     }),
-    vscode.commands.registerCommand("ff_git_image.deleteFailures", async () => {
-      const files = failures.snapshot;
-      if (!files.length) {
-        void vscode.window.showInformationMessage(
-          failures.scanning
-            ? "Scanning failure images. Try again when the scan completes."
-            : "No failure images to delete.",
-        );
-        return;
-      }
-      const key = JSON.stringify([
-        "deleteFailures",
-        files.map((file) => [
-          file.uri.toString(),
-          file.size,
-          file.mtime,
-          file.ctime,
-        ]),
-      ]);
-      const task = actions.queue.enqueue(
-        key,
-        `Delete ${files.length} failure images`,
-        async (report) => {
-          const paused = sidebar.pauseBackgroundChecks();
-          try {
-            return await failures.clean(files, report);
-          } finally {
-            try {
-              await sidebar.refresh(
-                [],
-                api.repositories.filter((repo) =>
-                  files.some(
-                    (file) => file.root.toString() === repo.rootUri.toString(),
-                  ),
-                ),
-              );
-            } finally {
-              paused.dispose();
-            }
-          }
-        },
-      );
-      await finishTask(task, "Moved failures to Trash");
-    }),
+    vscode.commands.registerCommand("ff_git_image.deleteFailures", () =>
+      cleanupFailures(failures.snapshot),
+    ),
+    vscode.commands.registerCommand(
+      "ff_git_image.deleteSelectedFailures",
+      async (input: unknown, selection?: ImageTreeItem[]) => {
+        const nodes = selectedTreeNodes(input, selection);
+        if (!nodes.length) return;
+        try {
+          await cleanupFailures(failures.select(nodes.flatMap(leaves)));
+        } catch (error) {
+          void vscode.window.showErrorMessage(
+            `FF Git Image: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    ),
     ...(
       ["stage", "unstage", "discard", "ignore", "unignore"] as ImageAction[]
     ).map((action) =>
       vscode.commands.registerCommand(
         `ff_git_image.${action}`,
         async (input: unknown, selection?: ImageTreeItem[]) => {
-          if (!(input instanceof ImageTreeItem)) return;
-          const selected = selection ?? [...tree.selection];
-          const nodes = selected.some((node) => node.id === input.id)
-            ? selected
-            : [input];
-          await runAction(action, nodes);
+          const nodes = selectedTreeNodes(input, selection);
+          if (nodes.length) await runAction(action, nodes);
         },
       ),
     ),

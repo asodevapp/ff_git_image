@@ -159,10 +159,11 @@ test("folder stage uses explicit literal image paths and scoped menus match real
     const pattern = new RegExp(menu.when.split(" =~ /")[1].slice(0, -1));
     for (const kind of ["image", "folder", "group"])
       for (const suffix of ["", ".ignored"])
-        assert.equal(
-          pattern.test(`ff_git_image.${kind}.failure${suffix}`),
-          false,
-        );
+        if (/\.(stage|unstage|discard)$/.test(menu.command))
+          assert.equal(
+            pattern.test(`ff_git_image.${kind}.failure${suffix}`),
+            false,
+          );
   }
   for (const menu of menus.filter((menu) =>
     /\.(stage|unstage|discard)$/.test(menu.command),
@@ -1025,4 +1026,49 @@ test("a deleted image recreated without an updated status cannot be staged as th
     /changed since it was selected or viewed/,
   );
   assert.deepEqual(calls, []);
+});
+
+test("failure folders support Ignore/Stop ignoring without staging generated artifacts", async (t) => {
+  const f = setup(t, { workingTreeChanges: [] });
+  const generated = ["a_testImage.png", "a_maskedDiff.png"].map((name) => ({
+    id: name,
+    root: "/repo",
+    repository: "repo",
+    path: `failures/${name}`,
+    status: "Failure",
+    scope: "failure",
+    after: { uri: uri(`/repo/failures/${name}`), label: name },
+  }));
+  const ignored = new Set();
+  f.ignores.filter = (_repo, changes, includeIgnored = false) =>
+    changes
+      .map((change) => ({ ...change, ignored: ignored.has(change.path) }))
+      .filter((change) => includeIgnored || !change.ignored);
+  f.ignores.setIgnored = async (_repo, paths, value) => {
+    calls.push(["ignore", paths, value]);
+    paths.forEach((file) => (value ? ignored.add(file) : ignored.delete(file)));
+  };
+  const artifacts = {
+    count: 2,
+    changes: () => generated,
+    onDidChange: new EventEmitter().event,
+  };
+  const tree = new ImageChangesTree(f.api, f.ignores, undefined, artifacts);
+  t.after(() => tree.dispose());
+  const actions = new ImageActions(f.api, f.ignores, tree);
+  const folder = tree.getChildren()[0].children[0];
+  await assert.rejects(actions.run("stage", folder), /only available/);
+  await assert.rejects(actions.run("discard", folder), /only available/);
+  assert.equal(await actions.run("ignore", folder), 2);
+  assert.equal(tree.count, 0);
+  f.ignores.filter = (_repo, changes) =>
+    changes.map((change) => ({ ...change, ignored: ignored.has(change.path) }));
+  await tree.refresh([]);
+  assert.equal(tree.count, 2);
+  assert.equal(await actions.run("unignore", tree.getChildren()[0]), 2);
+  assert.equal(ignored.size, 0);
+  assert.deepEqual(calls, [
+    ["ignore", generated.map((change) => change.path).sort(), true],
+    ["ignore", generated.map((change) => change.path).sort(), false],
+  ]);
 });

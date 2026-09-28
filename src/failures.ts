@@ -3,7 +3,8 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { ImageChange, mimeType } from "./changes";
 import { GitAPI, Repository } from "./git-api";
-import { maxImageBytes } from "./images";
+import { comparisonRevision, maxImageBytes } from "./images";
+import { confirmImageAction } from "./confirmation";
 
 export type ImageFilter = "all" | "changes" | "failures";
 export const imageFilters: Record<ImageFilter, string> = {
@@ -37,6 +38,7 @@ export interface FailureFile {
   size: number;
   mtime: number;
   ctime: number;
+  revision?: string;
 }
 
 function relative(root: vscode.Uri, uri: vscode.Uri): string | undefined {
@@ -114,6 +116,28 @@ export class FailureArtifacts implements vscode.Disposable {
   }
   get count() {
     return this.files.size;
+  }
+
+  select(changes: readonly ImageChange[]): FailureFile[] {
+    const selected = new Map<string, FailureFile>();
+    for (const change of changes) {
+      if (change.scope !== "failure") continue;
+      const key = change.after?.uri.toString();
+      const file = key && this.files.get(key);
+      if (
+        !file ||
+        file.path !== change.path ||
+        file.root.fsPath !== change.root ||
+        this.owner(file.uri)?.rootUri.toString() !== file.root.toString()
+      )
+        throw new Error(
+          "Selected failure images changed. Refresh and try again.",
+        );
+      selected.set(key!, { ...file, revision: change.revision });
+    }
+    return [...selected.values()].sort((a, b) =>
+      a.uri.toString().localeCompare(b.uri.toString()),
+    );
   }
   get scanning() {
     return !!this.running || this.pending.size > 0;
@@ -332,6 +356,14 @@ export class FailureArtifacts implements vscode.Disposable {
     await this.validate(file);
     if (bytes.length !== file.size)
       throw new Error(`Failure image changed: ${file.path}`);
+    if (
+      file.revision &&
+      comparisonRevision(null, { data: bytes, mime: mimeType(file.path) }) !==
+        file.revision
+    )
+      throw new Error(
+        `Failure image changed since it was viewed: ${file.path}. Refresh and try again.`,
+      );
     return createHash("sha256").update(bytes).digest("hex");
   }
 
@@ -391,15 +423,10 @@ export async function confirmFailureCleanup(
   files: readonly FailureFile[],
 ): Promise<boolean> {
   const bytes = files.reduce((sum, file) => sum + file.size, 0);
-  const choice = await vscode.window.showWarningMessage(
+  return confirmImageAction(
     `Move ${files.length} failure images to Trash?`,
-    {
-      modal: true,
-      detail:
-        `${(bytes / (1024 * 1024)).toFixed(2)} MiB. Includes hidden/ignored failure images. Stop tests before cleaning. Only these image files inside folders named exactly failures will be moved; other files and the Git index are preserved.\n\n` +
-        files.map((file) => file.uri.fsPath).join("\n"),
-    },
+    `${(bytes / (1024 * 1024)).toFixed(2)} MiB. Only the captured failure images will be moved, including any hidden/ignored files in this selection. Stop tests before cleaning.`,
+    files.map((file) => file.uri.fsPath),
     "Move to Trash",
   );
-  return choice === "Move to Trash";
 }

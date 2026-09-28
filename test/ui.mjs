@@ -1069,14 +1069,23 @@ try {
     await page.locator("#left-canvas").evaluate((canvas) => canvas.width),
     3456,
   );
-  // Raw failures have a single preview and no Git/ignore actions or pixel work.
+  // Raw failures have a single preview, cleanup/ignore actions, and no pixel work.
   const workersBeforeFailure = await page.evaluate(() => window.__activity.workers);
   await page.evaluate(() => window.__failureSnapshot());
   await page.waitForFunction(() => document.querySelector("#new-badge").textContent === "failure" && document.querySelector("#new-badge").checkVisibility());
   assert.equal(await page.locator("#left-pane").isVisible(), false);
   assert.equal(await page.locator("#right-pane").isVisible(), true);
   assert.equal(await page.locator("#comparison-toolbar").isVisible(), false);
-  for (const id of ["stage", "discard", "ignore"]) assert.equal(await page.locator(`#${id}`).isVisible(), false);
+  assert.equal(await page.locator("#stage").isVisible(), false);
+  assert.equal(await page.locator("#discard").textContent(), "Delete…");
+  for (const [id, expected] of [["discard", "deleteFailure"], ["ignore", "ignore"]]) {
+    await page.click(`#${id}`);
+    const action = await page.evaluate(() => window.__messages.findLast(message => message.type === "action"));
+    assert.equal(action.action, expected);
+    assert.equal(action.id, "failure");
+    assert.ok(action.revision);
+    await completeAction(action.request);
+  }
   assert.equal(await page.locator("#right-label").textContent(), "Actual · testImage");
   assert.match(await page.locator("#context").textContent(), /Generated failure artifact/);
   assert.equal(await page.locator("#summary").textContent(), "1 failure image");

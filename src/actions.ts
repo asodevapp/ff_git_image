@@ -7,6 +7,7 @@ import { ImageChangesTree, ImageTreeItem } from "./sidebar";
 import { imageRevision, readImagePair } from "./images";
 import { recoverIndexLock } from "./git-lock";
 import { ImageActionQueue, ImageActionTask } from "./action-queue";
+import { confirmImageAction } from "./confirmation";
 
 export type ImageAction =
   "stage" | "unstage" | "discard" | "ignore" | "unignore";
@@ -17,19 +18,12 @@ export type ConfirmDiscard = (
 export async function confirmDiscard(
   changes: readonly ImageChange[],
 ): Promise<boolean> {
-  const choice = await vscode.window.showWarningMessage(
+  return confirmImageAction(
     `Discard changes to ${changes.length} image${changes.length === 1 ? "" : "s"}?`,
-    {
-      modal: true,
-      detail:
-        "Tracked images will be restored to their staged (index) version. New images will be moved to Trash. Staged changes are preserved.\n\n" +
-        changes
-          .map((change) => `${change.repository}: ${change.path}`)
-          .join("\n"),
-    },
+    "Tracked images will be restored to their staged (index) version. New images will be moved to Trash. Staged changes are preserved.",
+    changes.map((change) => `${change.repository}: ${change.path}`),
     "Discard Changes",
   );
-  return choice === "Discard Changes";
 }
 
 export function leaves(item: ImageTreeItem): ImageChange[] {
@@ -102,7 +96,7 @@ export class ImageActions {
     const selected = [...selectedNodes.values()]
       .map((node) => node.change!)
       .filter((change) =>
-        change.scope === "failure" ? false : ignoreAction
+        ignoreAction
           ? change.ignored === (action === "unignore")
           : change.scope === scope && !change.ignored,
       )
@@ -319,7 +313,7 @@ export class ImageActions {
 
   private resolve(repo: Repository, selected: ImageChange[]): ImageChange[] {
     const visible = new Map(
-      this.ignores.changes(repo, true).map((change) => [change.id, change]),
+      this.tree.actionChanges(repo).map((change) => [change.id, change]),
     );
     return selected.map((previous) => {
       const current = visible.get(previous.id);

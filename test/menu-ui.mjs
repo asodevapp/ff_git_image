@@ -167,16 +167,64 @@ try {
   assert.equal(confirmation.message, "Discard changes to 32 images?");
   assert.equal(confirmation.options.modal, true);
   assert.match(confirmation.options.detail, /performance\/screen0\.png/);
-  assert.match(confirmation.options.detail, /performance\/screen31\.png/);
-  assert.deepEqual(confirmation.buttons, ["Discard Changes"]);
+  assert.match(confirmation.options.detail, /29 more files/);
+  assert.ok(confirmation.options.detail.length < 600);
+  assert.deepEqual(confirmation.buttons, ["Discard Changes", "View File List"]);
   await checkActions(row);
   await page.screenshot({
     path: path.join(root, ".test-host/inline-actions.png"),
   });
   await writeFile(path.join(control, "editChecked"), "yes");
+  await wait("failureReady");
+  const failureFile = page
+    .getByRole("treeitem")
+    .filter({ hasText: "screen000_testImage.png" })
+    .first();
+  const failureFolder = group("cleanup");
+  for (const node of [failureFile, failureFolder, group("Failures")]) {
+    await node.hover();
+    await action(node, "trash").waitFor({ state: "visible" });
+    await action(node, "eye-closed").waitFor({ state: "visible" });
+    for (const icon of ["add", "remove", "discard"])
+      assert.equal(await action(node, icon).count(), 0);
+    await node.click({ button: "right" });
+    await menu.waitFor({ state: "visible" });
+    const commands = await menu.innerText();
+    assert.match(commands, /Delete Selected Failure Images/);
+    assert.match(commands, /Ignore Images/);
+    assert.doesNotMatch(
+      commands,
+      /Accept Image Changes|Unstage Image Changes|Discard Image Changes/,
+    );
+    await page.keyboard.press("Escape");
+  }
+  await failureFolder.hover();
+  await action(failureFolder, "trash").click();
+  await wait("failureCleanupCancelled");
+  const selectedCleanup = JSON.parse(
+    await readFile(path.join(control, "failureCleanupCancelled"), "utf8"),
+  );
+  assert.equal(selectedCleanup.message, "Move 80 failure images to Trash?");
+  assert.ok(selectedCleanup.options.detail.length < 600);
+  assert.match(selectedCleanup.options.detail, /77 more files/);
+  assert.deepEqual(selectedCleanup.buttons, [
+    "Move to Trash",
+    "View File List",
+  ]);
+  await page.getByRole("button", { name: "[FF] Git Image: Delete All Failure Images…", exact: true }).click();
+  await wait("failureListRequested");
+  const allCleanup = JSON.parse(
+    await readFile(path.join(control, "failureListRequested"), "utf8"),
+  );
+  assert.equal(allCleanup.message, "Move 81 failure images to Trash?");
+  assert.ok(allCleanup.options.detail.length < 600);
+  await page.screenshot({
+    path: path.join(root, ".test-host/failure-actions.png"),
+  });
+  await writeFile(path.join(control, "failureActionsChecked"), "yes");
   assert.equal(await exited, 0);
   console.log(
-    "PASS: actual VS Code inline actions on files/folders/groups, file and folder stage/unstage, cancelled folder discard, and stable context menus during Git/pixel updates.",
+    "PASS: actual VS Code inline/context actions on files/folders/groups including failures, stage/unstage, bounded discard/cleanup confirmations, full file list without deletion, and stable context menus during Git/pixel updates.",
   );
   console.log(await readFile(path.join(control, "updated"), "utf8"));
 } catch (error) {
