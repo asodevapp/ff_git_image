@@ -5,26 +5,46 @@ import { GitAPI, Repository } from "./git-api";
 import type { ImageIgnore } from "./image-ignore";
 import { ImageCache } from "./image-cache";
 import { ImageStatistics } from "./statistics";
+import { FailureArtifacts, ImageFilter, isFailurePath } from "./failures";
 
 export const sidebarViewId = "ff_git_image.changes";
+
+function statusColor(status?: string): vscode.ThemeColor | undefined {
+  const colors: Record<string, string> = {
+    Added: "gitDecoration.addedResourceForeground",
+    Deleted: "gitDecoration.deletedResourceForeground",
+    Modified: "gitDecoration.modifiedResourceForeground",
+    Renamed: "gitDecoration.renamedResourceForeground",
+    Conflict: "gitDecoration.conflictingResourceForeground",
+    Failure: "list.errorForeground",
+  };
+  return status && colors[status]
+    ? new vscode.ThemeColor(colors[status])
+    : undefined;
+}
 
 export function imageQuickPicks(
   api: GitAPI,
   ignores?: ImageIgnore,
+  visible?: ImageChange[],
 ): (vscode.QuickPickItem & { change: ImageChange })[] {
   const scopes: Record<Scope, string> = {
     staged: "Staged",
     working: "Unstaged",
     conflict: "Merge conflict",
+    failure: "Failure artifact",
   };
-  return api.repositories
-    .flatMap((repo) => (ignores ? ignores.changes(repo) : collectChanges(repo)))
-    .map((change) => ({
-      label: path.posix.basename(change.path),
-      description: change.path,
-      detail: `${change.repository} · ${scopes[change.scope]} · ${change.status}${change.previousPath ? ` · from ${change.previousPath}` : ""}`,
-      change,
-    }));
+  return (
+    visible ??
+    api.repositories.flatMap((repo) =>
+      ignores ? ignores.changes(repo) : collectChanges(repo),
+    )
+  ).map((change) => ({
+    label: path.posix.basename(change.path),
+    description: change.path,
+    detail: `${change.repository} · ${scopes[change.scope]} · ${change.status}${change.previousPath ? ` · from ${change.previousPath}` : ""}`,
+    change,
+  }));
 }
 
 export class ImageTreeItem extends vscode.TreeItem {
@@ -101,11 +121,22 @@ export class ImageChangesTree
   private sweepAgain = false;
   private readonly revisionsChanged = new vscode.EventEmitter<void>();
   readonly onDidChangeRevisions = this.revisionsChanged.event;
+  filter: ImageFilter = "all";
+  get failureCount() {
+    return this.failures?.count ?? 0;
+  }
+
+  setFilter(filter: ImageFilter) {
+    if (this.filter === filter) return;
+    this.filter = filter;
+    this.invalidate();
+  }
 
   constructor(
     private readonly api: GitAPI,
     private readonly ignores?: ImageIgnore,
     private readonly statistics?: ImageStatistics,
+    private readonly failures?: FailureArtifacts,
   ) {
     this.images = new ImageCache(api);
     // One image watcher for the model, viewer and statistics. Events invalidate
@@ -127,6 +158,18 @@ export class ImageChangesTree
     }
     if (ignores)
       this.subscriptions.push(ignores.onDidChange(() => this.invalidate()));
+    if (failures) {
+      let count = failures.count;
+      this.subscriptions.push(
+        failures.onDidChange(() => {
+          this.invalidate();
+          if (count !== failures.count) {
+            count = failures.count;
+            this.revisionsChanged.fire();
+          }
+        }),
+      );
+    }
     if (statistics)
       this.subscriptions.push(
         statistics.onDidChange((revision) => {
@@ -163,6 +206,8 @@ export class ImageChangesTree
   }
 
   async prepare(item: ImageTreeItem, urgent = false): Promise<void> {
+    if (urgent && item.change?.scope === "failure" && !item.change.revision)
+      return this.readRevision(item, true);
     if (urgent) {
       for (const job of this.pendingReads)
         if (job.item === item) job.urgent = true;
@@ -170,7 +215,11 @@ export class ImageChangesTree
     }
     if (item.preparing) return item.preparing;
     const run = async () => {
-      if (item.change && !item.change.revision)
+      if (
+        item.change &&
+        item.change.scope !== "failure" &&
+        !item.change.revision
+      )
         await this.readRevision(item, urgent);
       for (const child of item.children ?? []) {
         if (this.disposed || (!urgent && item.generation !== this.generation))
@@ -338,9 +387,12 @@ export class ImageChangesTree
 
   private updateMetric(item: ImageTreeItem) {
     if (!item.change || item.generation !== this.generation) return;
-    const result = this.statistics?.get(item.change.revision);
+    const result =
+      item.change.scope === "failure"
+        ? undefined
+        : this.statistics?.get(item.change.revision);
     const next = {
-      count: 1,
+      count: item.change.scope === "failure" ? 0 : 1,
       ready: result && !result.error ? 1 : 0,
       changed: result && !result.error ? result.changed : 0,
       total: result && !result.error ? result.total : 0,
@@ -380,7 +432,18 @@ export class ImageChangesTree
   private metricDecoration(
     item: ImageTreeItem,
   ): vscode.FileDecoration | undefined {
-    if (!this.statistics) return undefined;
+    const color = statusColor(item.change?.status);
+    if (item.contextValue?.includes(".failure"))
+      return {
+        badge: "!",
+        tooltip: item.change?.after?.label ?? "Generated failure images",
+        color: statusColor("Failure"),
+        propagate: false,
+      };
+    if (!this.statistics)
+      return color
+        ? { color, tooltip: item.change?.status, propagate: false }
+        : undefined;
     const { count, ready, changed, total, errors } = item.metrics;
     const percent = total ? (changed * 100) / total : 0;
     const exact = `${percent.toFixed(2)}% changed pixels`;
@@ -405,7 +468,17 @@ export class ImageChangesTree
             : percent === 100
               ? "Δ"
               : String(Math.floor(percent));
-    return { badge, tooltip, propagate: false };
+    return {
+      badge:
+        item.change?.status === "Added"
+          ? "+"
+          : item.change?.status === "Deleted"
+            ? "−"
+            : badge,
+      tooltip: item.change ? `${item.change.status} · ${tooltip}` : tooltip,
+      color,
+      propagate: false,
+    };
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {
@@ -482,6 +555,7 @@ export class ImageChangesTree
     recheck?: readonly ImageTreeItem[],
     repositories: readonly Repository[] = this.api.repositories,
   ): Promise<void> {
+    if (!recheck) await this.failures?.refresh();
     await this.ignores?.refresh(repositories);
     const results = await Promise.allSettled(
       repositories.map((repo) => repo.status()),
@@ -501,7 +575,21 @@ export class ImageChangesTree
   }
 
   private changes(repo: Repository): ImageChange[] {
-    return this.ignores ? this.ignores.changes(repo) : collectChanges(repo);
+    const git = this.ignores
+      ? this.ignores.changes(repo)
+      : collectChanges(repo);
+    if (!this.failures) return git;
+    const artifacts = this.failures.changes(repo);
+    return [
+      ...(this.filter === "failures"
+        ? []
+        : git.filter((change) => !isFailurePath(change.path))),
+      ...(this.filter === "changes"
+        ? []
+        : this.ignores
+          ? this.ignores.filter(repo, artifacts)
+          : artifacts),
+    ];
   }
 
   private groups(repo: Repository, changes: ImageChange[]): ImageTreeItem[] {
@@ -509,6 +597,7 @@ export class ImageChangesTree
       ["conflict", "Merge Changes", "warning"],
       ["staged", "Staged Changes", "check"],
       ["working", "Changes", "diff"],
+      ["failure", "Failures", "warning"],
     ];
     return scopes.flatMap(([scope, label, icon]) => {
       const matching = changes.filter((change) => change.scope === scope);
@@ -519,7 +608,10 @@ export class ImageChangesTree
       );
       node.id = JSON.stringify([repo.rootUri.toString(), scope]);
       node.description = String(matching.length);
-      node.iconPath = new vscode.ThemeIcon(icon);
+      node.iconPath = new vscode.ThemeIcon(
+        icon,
+        scope === "failure" ? statusColor("Failure") : undefined,
+      );
       node.contextValue = `ff_git_image.group.${scope}`;
       return [node];
     });
@@ -579,7 +671,10 @@ export class ImageChangesTree
           ]);
           node.description = String(compact.count);
           node.tooltip = compact.path;
-          node.iconPath = new vscode.ThemeIcon("folder");
+          node.iconPath = new vscode.ThemeIcon(
+            "folder",
+            scope === "failure" ? statusColor("Failure") : undefined,
+          );
           node.contextValue = `ff_git_image.folder.${scope}`;
           return node;
         }),
@@ -600,10 +695,17 @@ export class ImageChangesTree
       label: `${change.path}, ${change.scope}, ${change.status}`,
     };
     node.resourceUri = change.after?.uri ?? change.before?.uri;
-    node.iconPath = new vscode.ThemeIcon("file-media");
+    node.iconPath = new vscode.ThemeIcon(
+      "file-media",
+      statusColor(change.status),
+    );
     node.change = change;
     node.contextValue = `ff_git_image.image.${change.scope}${change.ignored ? ".ignored" : ""}`;
-    node.description = change.ignored ? "Ignored" : "";
+    node.description = change.ignored
+      ? "Ignored"
+      : change.scope === "failure"
+        ? change.after?.label
+        : "";
     node.command = {
       command: "ff_git_image.openFile",
       title: "Compare Image Changes",
@@ -629,7 +731,8 @@ export class ImageChangesTree
   }
 
   private currentListing(): string {
-    return JSON.stringify(
+    return JSON.stringify([
+      this.filter,
       this.api.repositories.map((repo) => [
         repo.rootUri.toString(),
         this.changes(repo).map((change) => [
@@ -643,7 +746,7 @@ export class ImageChangesTree
           change.after?.ref,
         ]),
       ]),
-    );
+    ]);
   }
 
   /** A completed write invalidates data for its exact paths, never the tree UI.
@@ -711,8 +814,9 @@ export class ImageChangesTree
         node.resourceUri = vscode.Uri.parse(
           `ff-git-image-metric:/${encodeURIComponent(node.id!)}`,
         );
-        this.decorationNodes.set(node.resourceUri.toString(), node);
       }
+      if (node.resourceUri)
+        this.decorationNodes.set(node.resourceUri.toString(), node);
       if (node.change?.revision) {
         let nodes = this.metricNodes.get(node.change.revision);
         if (!nodes)

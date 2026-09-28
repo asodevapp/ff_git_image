@@ -15,7 +15,7 @@ export const imageTypes: Record<string, string> = {
 };
 export const mimeType = (file: string): string | undefined =>
   imageTypes[path.extname(file).toLowerCase()];
-export type Scope = "staged" | "working" | "conflict";
+export type Scope = "staged" | "working" | "conflict" | "failure";
 export interface ImageSource {
   uri: Uri;
   ref?: string;

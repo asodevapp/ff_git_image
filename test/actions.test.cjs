@@ -35,6 +35,11 @@ const vscode = {
     }
   },
   TreeItemCollapsibleState: { Expanded: 2, None: 0 },
+  ThemeColor: class {
+    constructor(id) {
+      this.id = id;
+    }
+  },
   ThemeIcon: class {},
   FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
   Uri: {
@@ -150,6 +155,15 @@ test("folder stage uses explicit literal image paths and scoped menus match real
   ]);
   const menus =
     require("../package.json").contributes.menus["view/item/context"];
+  for (const menu of menus) {
+    const pattern = new RegExp(menu.when.split(" =~ /")[1].slice(0, -1));
+    for (const kind of ["image", "folder", "group"])
+      for (const suffix of ["", ".ignored"])
+        assert.equal(
+          pattern.test(`ff_git_image.${kind}.failure${suffix}`),
+          false,
+        );
+  }
   for (const menu of menus.filter((menu) =>
     /\.(stage|unstage|discard)$/.test(menu.command),
   )) {
@@ -399,6 +413,76 @@ test("tree statistics aggregate pixel counts and invalidate when the image revis
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+test("created and deleted images keep status colors and badges while metrics update", async (t) => {
+  const f = setup(t, { workingTreeChanges: [] });
+  f.repo.state.workingTreeChanges.push(
+    f.entry("new.png", Status.UNTRACKED),
+    f.entry("deleted.png", Status.DELETED),
+  );
+  const stats = new ImageStatistics();
+  const tree = new ImageChangesTree(f.api, f.ignores, stats);
+  t.after(() => {
+    tree.dispose();
+    stats.dispose();
+  });
+  for (const [name, color, badge] of [
+    ["new.png", "addedResourceForeground", "+"],
+    ["deleted.png", "deletedResourceForeground", "−"],
+  ]) {
+    const item = tree.leaves().find((item) => item.change.path === name);
+    const decoration = tree.provideFileDecoration(item.resourceUri);
+    assert.equal(decoration.color.id, `gitDecoration.${color}`);
+    assert.equal(decoration.badge, badge);
+    assert.equal(decoration.propagate, false);
+  }
+});
+
+test("failure folders read no image bytes until a file is opened, then reuse its preview cache", async (t) => {
+  const f = setup(t, { workingTreeChanges: [] });
+  const generated = ["a_testImage.png", "a_masterImage.png"].map((name) => ({
+    id: name,
+    root: "/repo",
+    repository: "repo",
+    path: `failures/${name}`,
+    status: "Failure",
+    scope: "failure",
+    after: { uri: uri(`/repo/failures/${name}`), label: name },
+  }));
+  for (const change of generated)
+    files.set(change.after.uri.toString(), Buffer.from("png"));
+  const failures = {
+    count: 2,
+    changes: () => generated,
+    onDidChange: new EventEmitter().event,
+  };
+  const tree = new ImageChangesTree(f.api, undefined, undefined, failures);
+  t.after(() => tree.dispose());
+  const readFile = vscode.workspace.fs.readFile;
+  const stat = vscode.workspace.fs.stat;
+  let reads = 0;
+  vscode.workspace.fs.stat = async (uri) => ({
+    ...(await stat(uri)),
+    mtime: 1,
+    ctime: 1,
+    size: files.get(uri.toString())?.length ?? 0,
+  });
+  vscode.workspace.fs.readFile = async (uri) => {
+    reads++;
+    return readFile(uri);
+  };
+  t.after(() => {
+    vscode.workspace.fs.readFile = readFile;
+    vscode.workspace.fs.stat = stat;
+  });
+  await tree.prepare(tree.getChildren()[0]);
+  assert.equal(reads, 0);
+  const node = tree.leaves()[0];
+  await tree.prepare(node, true);
+  assert(node.change.revision);
+  await tree.images.comparison(node.change);
+  assert.equal(reads, 1);
+});
+
 test("slow initial reads survive repeated status events and never hide Git actions", async (t) => {
   const f = setup(t);
   for (let i = 0; i < 31; i++) {
@@ -487,7 +571,7 @@ test("diff results update decorations without any tree refresh and batch only af
   assert.ok(!decorations[0].includes(unaffected.resourceUri));
   assert.equal(
     tree.provideFileDecoration(target.resourceUri).tooltip,
-    "30.00% changed pixels",
+    "Modified · 30.00% changed pixels",
   );
   assert.equal(tree.getChildren()[0], group);
   events.length = 0;

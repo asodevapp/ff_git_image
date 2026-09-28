@@ -73,6 +73,22 @@ exports.run = async () => {
   };
   const shimWindow = new Proxy(vscode.window, {
     get(target, key) {
+      if (key === "showWarningMessage" && process.env.FF_GIT_IMAGE_MENU_CONTROL)
+        return async (message, options, ...buttons) => {
+          if (options?.modal && message.startsWith("Discard changes to")) {
+            // VS Code refuses modal dialogs in extension test mode. Record the
+            // production confirmation request and simulate Cancel at this boundary.
+            fs.writeFileSync(
+              path.join(
+                process.env.FF_GIT_IMAGE_MENU_CONTROL,
+                "discardCancelled",
+              ),
+              JSON.stringify({ message, options, buttons }),
+            );
+            return undefined;
+          }
+          return target.showWarningMessage(message, options, ...buttons);
+        };
       if (key === "createTreeView")
         return (id, options) => {
           sidebar = options.treeDataProvider;
@@ -242,8 +258,28 @@ exports.run = async () => {
     fs.writeFileSync(path.join(control, "edited"), JSON.stringify(edited));
     await until(
       () => fs.existsSync(path.join(control, "editChecked")),
-      "folder menu remained open after image edit",
+      "folder menu and inline actions checked",
+      90000,
     );
+    await repo.status();
+    assert.equal(
+      repo.state.indexChanges.filter((entry) =>
+        entry.uri.fsPath.includes("/performance/"),
+      ).length,
+      0,
+    );
+    assert.equal(
+      repo.state.workingTreeChanges.filter((entry) =>
+        entry.uri.fsPath.includes("/performance/"),
+      ).length,
+      names.length,
+    );
+    for (const [index, name] of names.entries())
+      assert.deepEqual(
+        fs.readFileSync(path.join(root, name)),
+        index === 0 ? png(789) : after,
+        "Cancelled inline discard preserves working images",
+      );
   }
   const report = {
     vscode: vscode.version,

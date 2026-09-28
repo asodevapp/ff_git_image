@@ -41,6 +41,11 @@ Module._load = function (name, ...rest) {
           }
         },
         TreeItemCollapsibleState: { None: 0, Expanded: 2 },
+        ThemeColor: class {
+          constructor(id) {
+            this.id = id;
+          }
+        },
         ThemeIcon: class {
           constructor(id) {
             this.id = id;

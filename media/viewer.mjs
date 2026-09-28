@@ -5,13 +5,14 @@ const $ = (id) => document.getElementById(id);
 const saved = vscode.getState() ?? {};
 const modes = ["side", "swipe", "overlay", "diff", "blink", "before", "after"];
 let items = [],
-  activeId = saved.activeId;
+  activeId = saved.activeId,
+  filter = "all";
 let request = 0,
   revision,
   before = null,
   after = null,
   loaded = false,
-  newImage = false,
+  singleImage = false,
   diff = null,
   mask = null,
   bounds = null;
@@ -38,8 +39,8 @@ const surfaces = viewports.map((viewport) =>
   viewport.querySelector(".surface"),
 );
 const isLogicalScaling = () =>
-  !newImage && $("mode").value === "side" && $("logical-scaling").checked;
-const primaryIndex = () => (newImage ? 1 : 0);
+  !singleImage && $("mode").value === "side" && $("logical-scaling").checked;
+const primaryIndex = () => (singleImage ? 1 : 0);
 const current = () => items.find((item) => item.id === activeId);
 const dimensions = (image) =>
   image ? `${image.width} × ${image.height}` : "Not present";
@@ -102,7 +103,7 @@ function clear(resetCanvases = true) {
   before = after = diff = mask = bounds = null;
   rawMetrics = "";
   loaded = false;
-  newImage = false;
+  singleImage = false;
   revision = undefined;
   $("changes").disabled = true;
   for (const canvas of resetCanvases ? canvases : []) {
@@ -131,16 +132,24 @@ function select(id, reload = true) {
     $("context").textContent = "Choose an image in the FF Git Image sidebar.";
     $("metrics").textContent = "";
     empty(
-      items.length ? "Choose an image" : "No changed images",
+      items.length
+        ? "Choose an image"
+        : filter === "failures"
+          ? "No failure images"
+          : "No changed images",
       items.length
         ? "Choose an image in the FF Git Image sidebar. Use Images above to open it."
-        : "Open a Git repository and change an image. Check .image_ignore for excluded images, or use Refresh to update Git status.",
+        : filter === "failures"
+          ? "No visible images in failures folders. Check .image_ignore or use Refresh to scan again."
+          : "Open a Git repository and change an image. Check .image_ignore and the image filter for excluded files, or use Refresh.",
     );
     return;
   }
   $("filename").textContent = item.path;
   $("context").textContent =
-    `${item.repository} · ${item.status} · ${item.beforeLabel} → ${item.afterLabel}${item.previousPath ? ` · from ${item.previousPath}` : ""}`;
+    item.scope === "failure"
+      ? `${item.repository} · Generated failure artifact · ${item.afterLabel}`
+      : `${item.repository} · ${item.status} · ${item.beforeLabel} → ${item.afterLabel}${item.previousPath ? ` · from ${item.previousPath}` : ""}`;
   // Keep the current comparison visible while checking for new image bytes.
   if (revision === undefined) {
     $("metrics").textContent = "Loading image versions…";
@@ -186,12 +195,17 @@ window.addEventListener("message", async (event) => {
     updateActions();
     return;
   } else if (data.type === "snapshot") {
+    filter = data.filter ?? "all";
     const previousIndex = Math.max(
       0,
       items.findIndex((item) => item.id === activeId),
     );
     items = data.changes;
-    $("summary").textContent = `${items.length} image changes`;
+    $("summary").textContent =
+      `${items.length} ${data.filter === "failures" ? "failure " : ""}${items.length === 1 ? "image" : "images"}`;
+    $("clean-failures").hidden = !data.failureCount;
+    $("clean-failures").textContent =
+      `Delete all failures (${data.failureCount ?? 0})…`;
     const next =
       data.selected ??
       (items.some((item) => item.id === activeId)
@@ -249,13 +263,15 @@ window.addEventListener("message", async (event) => {
       return;
     }
     loaded = true;
-    // Only an explicitly added, readable image has no before pane. A failed
-    // before decode or a merge conflict must keep the comparison and its notice.
-    newImage =
+    // Added images and raw failure artifacts use a single pane. A failed before
+    // decode or a merge conflict must keep the comparison and its notice.
+    singleImage =
       comparisonValid &&
-      current()?.status === "Added" &&
-      current()?.beforeLabel === "Not present" &&
-      !before && !!after;
+      (current()?.scope === "failure" ||
+        (current()?.status === "Added" &&
+          current()?.beforeLabel === "Not present")) &&
+      !before &&
+      !!after;
     $("empty").hidden = true;
     $("panes").hidden = false;
     rawMetrics = comparisonValid
@@ -265,7 +281,7 @@ window.addEventListener("message", async (event) => {
     startBlink();
     vscode.postMessage({ type: "viewed", id: activeId, revision });
     updateActions();
-    if (comparisonValid && !isLogicalScaling() && !newImage) calculate();
+    if (comparisonValid && !isLogicalScaling() && !singleImage) calculate();
   } else if (data.type === "error") notice(data.message);
 });
 
@@ -281,7 +297,7 @@ function calculate() {
   cancelDiff();
   diff = mask = bounds = null;
   $("changes").disabled = true;
-  if (!loaded || !comparisonValid || isLogicalScaling() || newImage) return;
+  if (!loaded || !comparisonValid || isLogicalScaling() || singleImage) return;
   rawMetrics = "Comparing pixels…";
   $("metrics").textContent = rawMetrics;
   const tolerance = Math.max(
@@ -362,10 +378,16 @@ function geometry() {
 function render() {
   const mode = $("mode").value,
     layout = isLogicalScaling(),
-    side = mode === "side" && !newImage,
+    side = mode === "side" && !singleImage,
     mix = Number($("mix").value) / 100;
-  $("comparison-toolbar").hidden = newImage;
-  $("new-badge").hidden = !newImage;
+  $("comparison-toolbar").hidden = singleImage;
+  $("new-badge").hidden = !singleImage;
+  $("new-badge").textContent =
+    current()?.scope === "failure" ? "failure" : "new";
+  $("new-badge").title =
+    current()?.scope === "failure" ? "Generated failure image" : "New image";
+  $("new-badge").dataset.kind =
+    current()?.scope === "failure" ? "failure" : "new";
   $("mix-control").hidden = !["swipe", "overlay"].includes(mode);
   $("mix-label").textContent = mode === "swipe" ? "Position" : "Opacity";
   $("mix-value").textContent = `${Math.round(mix * 100)}%`;
@@ -374,7 +396,7 @@ function render() {
   $("strength-control").hidden =
     $("highlight-control").hidden || !$("highlight").checked;
   $("tolerance-control").hidden = layout;
-  $("changes").hidden = layout || newImage;
+  $("changes").hidden = layout || singleImage;
   $("actual").textContent = layout ? "100%" : "1:1";
   $("actual").title = layout
     ? "Use the smaller image's width for both versions"
@@ -384,8 +406,8 @@ function render() {
     : "Image zoom";
   $("panes").classList.toggle("single", !side);
   $("panes").classList.toggle("layout", layout);
-  $("left-pane").hidden = newImage;
-  $("right-pane").hidden = !side && !newImage;
+  $("left-pane").hidden = singleImage;
+  $("right-pane").hidden = !side && !singleImage;
   if (!loaded) return;
   const view = geometry();
   const item = current();
@@ -440,8 +462,9 @@ function render() {
       `${dimensions(after)}${after ? ` · ${sourceZoom(1)}` : ""}`;
     $("metrics").textContent =
       `Logical scaling · Equal width, original proportions · ${dimensions(before)} → ${dimensions(after)}${comparisonValid ? "" : " · One version unavailable"}`;
-  } else if (newImage) {
-    $("metrics").textContent = `${dimensions(after)} · New image`;
+  } else if (singleImage) {
+    $("metrics").textContent =
+      `${dimensions(after)} · ${item.scope === "failure" ? item.afterLabel : "New image"}`;
   } else {
     $("metrics").textContent = rawMetrics;
   }
@@ -462,7 +485,7 @@ function render() {
     }
   };
   for (const [index, canvas] of canvases.entries()) {
-    if (newImage ? index === 0 : index === 1 && !side) continue;
+    if (singleImage ? index === 0 : index === 1 && !side) continue;
     const image = index ? after : before;
     const canvasWidth = layout ? (image?.width ?? view.width) : width;
     const canvasHeight = layout
@@ -476,7 +499,7 @@ function render() {
     canvas.classList.toggle("pixelated", !layout && scale >= 2);
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, width, height);
-    if (newImage) {
+    if (singleImage) {
       draw(ctx, after);
     } else if (side) {
       draw(ctx, index ? after : before);
@@ -541,7 +564,7 @@ function synchronize(source) {
 function startBlink() {
   clearInterval(blinkTimer);
   blinkTimer = undefined;
-  if (loaded && !newImage && $("mode").value === "blink" && !document.hidden)
+  if (loaded && !singleImage && $("mode").value === "blink" && !document.hidden)
     blinkTimer = setInterval(() => {
       blinkAfter = !blinkAfter;
       render();
@@ -588,7 +611,7 @@ for (const viewport of viewports) {
     if (event.button !== 0 || !loaded) return;
     const rect = canvases[0].getBoundingClientRect();
     const swipe =
-      !newImage &&
+      !singleImage &&
       $("mode").value === "swipe" &&
       Math.abs(
         event.clientX -
@@ -649,8 +672,12 @@ function changeMode() {
   render();
   startBlink();
   if (
-    loaded && comparisonValid && !isLogicalScaling() &&
-    !newImage && !diff && !worker
+    loaded &&
+    comparisonValid &&
+    !isLogicalScaling() &&
+    !singleImage &&
+    !diff &&
+    !worker
   )
     calculate();
   save();
@@ -714,6 +741,9 @@ $("changes").addEventListener("click", () => {
     viewport.clientHeight / 2;
   synchronize(viewport);
 });
+$("clean-failures").addEventListener("click", () =>
+  vscode.postMessage({ type: "cleanFailures" }),
+);
 $("show-sidebar").addEventListener("click", () =>
   vscode.postMessage({ type: "showSidebar" }),
 );
@@ -726,13 +756,18 @@ $("open").addEventListener("click", () =>
 function updateActions() {
   const item = current(),
     index = items.findIndex((item) => item.id === activeId);
+  for (const id of ["stage", "discard", "ignore"])
+    $(id).hidden = item?.scope === "failure";
   const actionBusy = [...pendingActions.values()].includes(activeId);
   const ready = loaded && comparisonValid && !!revision && !actionBusy;
   $("previous").disabled = index <= 0;
   $("next").disabled = index < 0 || index >= items.length - 1;
   $("stage").textContent = item?.scope === "staged" ? "Unstage" : "Stage";
   $("stage").disabled =
-    !ready || !item || item.ignored || item.scope === "conflict";
+    !ready ||
+    !item ||
+    item.ignored ||
+    ["conflict", "failure"].includes(item.scope);
   $("discard").disabled =
     !ready || !item || item.ignored || item.scope !== "working";
   $("ignore").textContent = item?.ignored ? "Stop ignoring" : "Ignore";
@@ -749,6 +784,7 @@ function act(action) {
   if (
     !revision ||
     !current() ||
+    current().scope === "failure" ||
     [...pendingActions.values()].includes(activeId)
   )
     return;

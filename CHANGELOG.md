@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+- Highlight failure files, folders, group icons, and the preview badge in the theme's red error color.
+- Show Stage, Unstage, and Discard quick-action buttons on image, folder, and change-group rows when hovered or focused, using the existing action queue and discard confirmation.
+- Color added, deleted, modified, renamed, and conflicted images using VS Code's Git theme colors. Added/deleted files keep `+`/`−` badges while background metrics update.
+- Add All images / Without failures / Failures only filters and a separate Failures group, including Git-ignored artifacts. Keep each image as a separate row with its artifact role and a full-width preview.
+- Add Delete All Failure Images with a captured file list, confirmation, revision checks, shared FIFO progress, and Trash-only deletion. Preserve non-image diagnostics, files outside failures folders, and the Git index.
+- Scan failure metadata incrementally, preserve stable tree handles, and load image bytes only when an artifact is opened or cleanup is requested.
+
 ## 1.0.1
 
 - Show added images at full width with a `new` badge, without an empty before pane or comparison controls. Preserve comparison preferences for modified images, and keep zoom, pan, and file actions available.

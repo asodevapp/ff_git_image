@@ -57,6 +57,7 @@ select:focus-visible {
 header {
   padding: 13px 18px;
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -264,6 +265,9 @@ input[type="range"] {
   border-radius: 4px;
   padding: 0 6px;
   font-weight: 600;
+}
+#new-badge[data-kind="failure"] {
+  color: var(--vscode-list-errorForeground, #f88070);
 }
 .viewport {
   overflow: auto;

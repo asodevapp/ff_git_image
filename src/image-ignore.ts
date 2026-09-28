@@ -39,9 +39,13 @@ export class ImageIgnore implements vscode.Disposable {
   }
 
   changes(repo: Repository, includeIgnored = this.showIgnored): ImageChange[] {
+    return this.filter(repo, collectChanges(repo), includeIgnored);
+  }
+
+  filter(repo: Repository, changes: ImageChange[], includeIgnored = this.showIgnored): ImageChange[] {
     const matcher = this.rules.get(repo.rootUri.toString())?.matcher;
     // Match the destination path for renames and the last path for deletions.
-    return collectChanges(repo)
+    return changes
       .map((change) => ({
         ...change,
         ignored: matcher?.ignores(change.path) ?? false,

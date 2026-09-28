@@ -121,6 +121,8 @@ A partially staged file has **two separate entries**. Renames use the old path f
 
 ### Accept or discard a folder
 
+Hover over an image, folder, or Changes / Staged Changes group to reveal quick actions, like VS Code's Source Control: **Discard** (undo arrow) and **Stage** (`+`) for unstaged changes, or **Unstage** (`−`) for staged changes. Folder and group actions apply to their matching image descendants. These buttons use the same selection rules, queue, revision checks, and discard confirmation as the context menu.
+
 Right-click an image, folder, or scope heading in the FF Git Image tree:
 
 - **Accept Image Changes (Stage)** in Changes stages the selected images, including additions and deletions.
@@ -141,7 +143,21 @@ Commands refresh Git status only in the selected repositories. Initial reads nee
 
 If staging or unstaging fails specifically because `index.lock` exists, choose **Retry**, **Open Git Log**, or **Remove index.lock…**. Removal needs a second confirmation that Git operations have been stopped. The extension verifies the reported path against the repository's Git directory, including linked worktrees, rejects symlinks, and rechecks the lock identity and timestamps after confirmation. A replaced or changed lock is preserved. It never deletes a lock automatically based on age or starts `lsof`/shell commands. The extension cannot prove another process is idle; stop Git operations in other clients before confirming. The selected image revisions are checked again before one retry.
 
+### Failure images
+
+Failure files, folders, and the group heading use the theme's red error color, with matching icons and a red **failure** badge in the viewer.
+
+Use the **Filter Images** funnel in the sidebar header to select **All images**, **Without failures**, or **Failures only**. The choice is remembered for the workspace and applies to the tree, image search, and comparison navigation.
+
+The **Failures** group lists supported images inside directories named exactly `failures`, including files ignored by Git. Each artifact stays a separate file: `*_masterImage.png` is Expected, `*_testImage.png` is Actual, and `*_isolatedDiff.png` / `*_maskedDiff.png` identify their generated masks. Other image names are shown as Failure image. The viewer opens one artifact at full width with a **failure** badge. It does not pair the artifacts or offer Git/ignore actions for them; ordinary image changes outside these directories keep their usual Git actions. `.image_ignore` and **Show Ignored Images** still control which failure rows are visible.
+
+**Delete All Failure Images…** (Trash icon in the sidebar, also available above the viewer) shows the captured file count, total size, and exact paths across open repositories, including hidden or ignored failure images. After confirmation it moves only those files to Trash. It preserves non-image diagnostics, other directories, baselines outside `failures`, and the Git index. Tracked files inside `failures` can consequently appear as working-tree deletions in Source Control. A file that changes before verification completes cancels cleanup; newly generated files are left for the next cleanup. Stop tests before confirming. Cleanup shares the image-action queue, reports partial completion on errors, and never falls back to permanent deletion. Images over the 32 MiB verification limit must be removed through Explorer.
+
+An initial scan and explicit Refresh inspect open repository directories, skipping `.git`, `.dart_tool`, `.fvm`, and `node_modules`. Symbolic links are not followed. File event bursts rescan only their affected `failures` directory. Unchanged scans keep existing tree handles and cached rows; failure image bytes are loaded only for an opened preview or explicit cleanup. Generated artifacts do not run pixel-diff workers or contribute to folder pixel percentages.
+
 ### Pixel percentages in the tree
+
+Added images use the theme's Git added color and a `+` badge; deleted images use the deleted color and `−`. Modified, renamed, and conflicted images also use their corresponding Git theme colors. These decorations stay independent of pixel calculations, so background results preserve status colors and open menus. Failure artifacts use the theme's red error color and a `!` badge.
 
 Once a comparison tab is open, its local background worker calculates original-pixel differences sequentially for visible images and sends only counts back to the tree. This does not change the active canvases, zoom, or comparison mode. Unchanged Git status notifications preserve the existing tree nodes and revisions. Percentages use native file decorations, separate from tree structure updates, so background results do not reset context menus or selection. The compact badge shows a whole percentage (`0`, `<1`, `1`–`99`, or `Δ` for 100%); hover for the exact percentage and partial folder counts. `…` means pending and `!` means unavailable. File percentages and pixel-weighted folder percentages are cached by image revision, and only affected ancestor totals change. Values use Exact and original dimensions, independently of logical scaling and the current viewer color threshold. Closing the tab pauses remaining computation; reopening resumes it.
 

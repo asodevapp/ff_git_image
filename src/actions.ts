@@ -102,7 +102,7 @@ export class ImageActions {
     const selected = [...selectedNodes.values()]
       .map((node) => node.change!)
       .filter((change) =>
-        ignoreAction
+        change.scope === "failure" ? false : ignoreAction
           ? change.ignored === (action === "unignore")
           : change.scope === scope && !change.ignored,
       )

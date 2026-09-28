@@ -329,6 +329,7 @@ exports.run = async () => {
     "PASS: real VS Code — .image_ignore create/edit/delete watchers, exclusions and exceptions across tree/search/scopes, unchanged Git status, compact tree, stable image revisions, stable tree/menu during repeated native Git status events.",
   );
   await require("./actions-host.cjs").run(api, repo);
+  await require("./failures-host.cjs").run(api, repo);
   require("node:fs").writeFileSync(
     process.env.FF_GIT_IMAGE_TEST_RESULT,
     "passed",

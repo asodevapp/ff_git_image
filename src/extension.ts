@@ -12,6 +12,7 @@ import { ImageIgnore } from "./image-ignore";
 import { ImageAction, ImageActions } from "./actions";
 import { ImageStatistics } from "./statistics";
 import { ImageActionTask } from "./action-queue";
+import { FailureArtifacts, ImageFilter, imageFilters } from "./failures";
 
 const viewType = "ff_git_image.review";
 
@@ -96,6 +97,8 @@ class Review implements vscode.Disposable {
       type: "snapshot",
       changes: changes.map(publicChange),
       showIgnored: this.ignores.showIgnored,
+      filter: this.sidebar.filter,
+      failureCount: this.sidebar.failureCount,
       selected: selected?.id,
       repositories: this.api.repositories.map((repo) => ({
         root: repo.rootUri.fsPath,
@@ -129,6 +132,7 @@ class Review implements vscode.Disposable {
     this.statisticsRunning = true;
     try {
       for (const node of this.sidebar.leaves()) {
+        if (node.change?.scope === "failure") continue;
         if (
           this.disposed ||
           !this.panel.visible ||
@@ -220,7 +224,7 @@ class Review implements vscode.Disposable {
           return;
         try {
           const change = this.changes.get(data.id);
-          if (!change) return;
+          if (!change || change.scope === "failure") return;
           if (
             typeof data.revision !== "string" ||
             this.viewed.get(change.id) !== data.revision
@@ -245,6 +249,9 @@ class Review implements vscode.Disposable {
       case "showSidebar":
         await vscode.commands.executeCommand(`${sidebarViewId}.focus`);
         break;
+      case "cleanFailures":
+        await vscode.commands.executeCommand("ff_git_image.deleteFailures");
+        break;
       case "refresh": {
         this.statistics.retryUnavailable();
         await this.sidebar.refresh();
@@ -257,6 +264,11 @@ class Review implements vscode.Disposable {
         const sequence = ++this.sequence;
         const change = this.changes.get(data.id);
         if (!change) return;
+        if (change.scope === "failure") {
+          const node =
+            change.after && this.sidebar.findFile(change.after.uri, "failure");
+          if (node) await this.sidebar.prepare(node, true);
+        }
         const comparison = await this.sidebar.images.comparison(
           change,
           typeof data.revision === "string" ? data.revision : undefined,
@@ -383,7 +395,13 @@ export async function activate(context: vscode.ExtensionContext) {
   const statistics = new ImageStatistics();
   context.subscriptions.push(statistics);
   ignores.showIgnored = context.workspaceState.get("showIgnored", false);
-  const sidebar = new ImageChangesTree(api, ignores, statistics);
+  const failures = new FailureArtifacts(api);
+  context.subscriptions.push(failures);
+  const sidebar = new ImageChangesTree(api, ignores, statistics, failures);
+  const savedFilter = context.workspaceState.get<string>("imageFilter", "all");
+  sidebar.setFilter(
+    savedFilter in imageFilters ? (savedFilter as ImageFilter) : "all",
+  );
   let review: Review | undefined;
   const actions = new ImageActions(api, ignores, sidebar, undefined, (id) =>
     review?.viewed.get(id),
@@ -395,13 +413,37 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   let lastCount = -1;
   let lastIgnored: boolean | undefined;
+  let lastMessage: string | undefined;
+  let lastFailures: boolean | undefined;
+  let lastFilter: ImageFilter | undefined;
   const updateBadge = () => {
     const count = sidebar.count;
+    const message = [
+      `${imageFilters[sidebar.filter]} · ${failures.count} failure ${failures.count === 1 ? "image" : "images"}`,
+      ignores.showIgnored ? "Ignored images are visible" : "",
+      ...failures.warnings,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (message !== lastMessage) tree.message = lastMessage = message;
+    if (lastFailures !== !!failures.count) {
+      lastFailures = !!failures.count;
+      void vscode.commands.executeCommand(
+        "setContext",
+        "ff_git_image.hasFailures",
+        lastFailures,
+      );
+    }
+    if (lastFilter !== sidebar.filter) {
+      lastFilter = sidebar.filter;
+      void vscode.commands.executeCommand(
+        "setContext",
+        "ff_git_image.imageFilter",
+        lastFilter,
+      );
+    }
     if (lastIgnored !== ignores.showIgnored) {
       lastIgnored = ignores.showIgnored;
-      tree.message = ignores.showIgnored
-        ? "Ignored images are visible"
-        : undefined;
       void vscode.commands.executeCommand(
         "setContext",
         "ff_git_image.showIgnored",
@@ -422,7 +464,9 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerFileDecorationProvider(sidebar),
     ignores.onDidChange(updateBadge),
     sidebar.onDidChangeTreeData(updateBadge),
+    failures.onDidChange(updateBadge),
   );
+  void failures.refresh();
   let queueProgress: Promise<void> | undefined;
   const showQueueProgress = () => {
     if (queueProgress || actions.queue.idle) return;
@@ -453,27 +497,30 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   context.subscriptions.push(actions.queue.onDidChange(showQueueProgress));
   const commands = new Map<ImageActionTask, Promise<void>>();
+  const finishTask = async (task: ImageActionTask, label: string) => {
+    const existing = commands.get(task);
+    if (existing) return existing;
+    const completion = task.result
+      .then((count) => {
+        if (count)
+          void vscode.window.setStatusBarMessage(
+            `FF Git Image: ${label} — ${count} images`,
+            5000,
+          );
+      })
+      .catch((error) => {
+        void vscode.window.showErrorMessage(
+          `FF Git Image: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      })
+      .finally(() => commands.delete(task));
+    commands.set(task, completion);
+    return completion;
+  };
   const runAction = async (action: ImageAction, nodes: ImageTreeItem[]) => {
     try {
       const task = actions.enqueue(action, nodes);
-      const existing = commands.get(task);
-      if (existing) return await existing;
-      const completion = task.result
-        .then((count) => {
-          if (count)
-            void vscode.window.setStatusBarMessage(
-              `FF Git Image: ${action} — ${count} image changes`,
-              5000,
-            );
-        })
-        .catch((error) => {
-          void vscode.window.showErrorMessage(
-            `FF Git Image: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        })
-        .finally(() => commands.delete(task));
-      commands.set(task, completion);
-      await completion;
+      await finishTask(task, action);
     } catch (error) {
       void vscode.window.showErrorMessage(
         `FF Git Image: ${error instanceof Error ? error.message : String(error)}`,
@@ -540,6 +587,70 @@ export async function activate(context: vscode.ExtensionContext) {
     else current.panel.reveal(undefined, preserveFocus);
   };
   context.subscriptions.push(
+    vscode.commands.registerCommand("ff_git_image.filterImages", async () => {
+      const selected = await vscode.window.showQuickPick(
+        (Object.entries(imageFilters) as [ImageFilter, string][]).map(
+          ([filter, label]) => ({
+            label,
+            filter,
+            description:
+              filter === sidebar.filter ? "Current filter" : undefined,
+          }),
+        ),
+        {
+          title: "Filter images",
+          placeHolder: "Show or hide generated failure images",
+        },
+      );
+      if (!selected) return;
+      sidebar.setFilter(selected.filter);
+      updateBadge();
+      await context.workspaceState.update("imageFilter", selected.filter);
+    }),
+    vscode.commands.registerCommand("ff_git_image.deleteFailures", async () => {
+      const files = failures.snapshot;
+      if (!files.length) {
+        void vscode.window.showInformationMessage(
+          failures.scanning
+            ? "Scanning failure images. Try again when the scan completes."
+            : "No failure images to delete.",
+        );
+        return;
+      }
+      const key = JSON.stringify([
+        "deleteFailures",
+        files.map((file) => [
+          file.uri.toString(),
+          file.size,
+          file.mtime,
+          file.ctime,
+        ]),
+      ]);
+      const task = actions.queue.enqueue(
+        key,
+        `Delete ${files.length} failure images`,
+        async (report) => {
+          const paused = sidebar.pauseBackgroundChecks();
+          try {
+            return await failures.clean(files, report);
+          } finally {
+            try {
+              await sidebar.refresh(
+                [],
+                api.repositories.filter((repo) =>
+                  files.some(
+                    (file) => file.root.toString() === repo.rootUri.toString(),
+                  ),
+                ),
+              );
+            } finally {
+              paused.dispose();
+            }
+          }
+        },
+      );
+      await finishTask(task, "Moved failures to Trash");
+    }),
     ...(
       ["stage", "unstage", "discard", "ignore", "unignore"] as ImageAction[]
     ).map((action) =>
@@ -570,7 +681,11 @@ export async function activate(context: vscode.ExtensionContext) {
         ),
     ),
     vscode.commands.registerCommand("ff_git_image.findImage", async () => {
-      const picks = imageQuickPicks(api, ignores);
+      const picks = imageQuickPicks(
+        api,
+        ignores,
+        sidebar.leaves().map((node) => node.change!),
+      );
       if (!picks.length) {
         void vscode.window.showInformationMessage(
           "No visible image changes found. Check .image_ignore for excluded images.",

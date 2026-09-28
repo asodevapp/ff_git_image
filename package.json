@@ -3,7 +3,7 @@
   "displayName": "[FF] Git Image",
   "icon": "logo.png",
   "description": "Review image changes in a VS Code tab: side by side, swipe, overlay, blink and pixel diff.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "gornivv",
   "license": "MIT",
   "engines": {
@@ -99,6 +99,16 @@
         "icon": "$(eye)",
         "enablement": "view == ff_git_image.changes",
         "toggled": "ff_git_image.showIgnored"
+      },
+      {
+        "command": "ff_git_image.filterImages",
+        "title": "[FF] Git Image: Filter Images",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "ff_git_image.deleteFailures",
+        "title": "[FF] Git Image: Delete All Failure Images…",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -150,9 +160,34 @@
           "command": "ff_git_image.showIgnored",
           "when": "view == ff_git_image.changes",
           "group": "visibility@1"
+        },
+        {
+          "command": "ff_git_image.filterImages",
+          "when": "view == ff_git_image.changes",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ff_git_image.deleteFailures",
+          "when": "view == ff_git_image.changes && ff_git_image.hasFailures",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
+        {
+          "command": "ff_git_image.discard",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "ff_git_image.stage",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "ff_git_image.unstage",
+          "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.staged$/",
+          "group": "inline@2"
+        },
         {
           "command": "ff_git_image.stage",
           "when": "view == ff_git_image.changes && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.working$/",
@@ -175,7 +210,7 @@
         },
         {
           "command": "ff_git_image.unignore",
-          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.(image|folder|group)\\./",
+          "when": "view == ff_git_image.changes && ff_git_image.showIgnored && viewItem =~ /^ff_git_image\\.(image|folder|group)\\.(working|staged|conflict)(\\.|$)/",
           "group": "ignore@2"
         }
       ],

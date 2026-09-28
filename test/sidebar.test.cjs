@@ -24,6 +24,11 @@ Module._load = function (name, ...rest) {
           }
         },
         TreeItemCollapsibleState: { None: 0, Expanded: 2 },
+        ThemeColor: class {
+          constructor(id) {
+            this.id = id;
+          }
+        },
         ThemeIcon: class {
           constructor(id) {
             this.id = id;
@@ -220,4 +225,79 @@ test("search entries include full paths, repository, and staging scope for ident
     ),
   );
   assert.ok(picks.some((pick) => pick.description === "light/ru/screen.png"));
+});
+
+test("failure filters keep separate raw artifacts, remove Git duplicates and filter search", (t) => {
+  const git = api(
+    repo("/repo", {
+      workingTreeChanges: [
+        file("/repo", "screen.png"),
+        file("/repo", "test/failures/a_testImage.png", Status.UNTRACKED),
+      ],
+    }),
+  );
+  const event = new EventEmitter();
+  const artifacts = [
+    "masterImage",
+    "testImage",
+    "isolatedDiff",
+    "maskedDiff",
+  ].map((kind) => ({
+    id: kind,
+    path: `test/failures/a_${kind}.png`,
+    root: "/repo",
+    repository: "repo",
+    scope: "failure",
+    status: "Failure",
+    after: { uri: uri(`/repo/test/failures/a_${kind}.png`), label: kind },
+  }));
+  const failures = {
+    count: 4,
+    changes: () => artifacts,
+    onDidChange: event.event,
+    refresh: async () => {},
+  };
+  const tree = new ImageChangesTree(git, undefined, undefined, failures);
+  t.after(() => tree.dispose());
+  assert.equal(tree.count, 5);
+  assert.equal(
+    tree.leaves().filter((node) => node.change.scope === "failure").length,
+    4,
+  );
+  assert.equal(tree.getChildren().at(-1).label, "Failures");
+  const normal = tree
+    .leaves()
+    .find((node) => node.change.path === "screen.png");
+  const events = [];
+  tree.onDidChangeTreeData((value) => events.push(value));
+  event.fire();
+  assert.deepEqual(
+    events,
+    [],
+    "Unchanged artifact state must not reset tree/menu handles",
+  );
+  tree.setFilter("changes");
+  assert.equal(tree.count, 1);
+  assert.equal(tree.leaves()[0], normal);
+  tree.setFilter("failures");
+  assert.equal(tree.count, 4);
+  assert(
+    tree
+      .leaves()
+      .every((node) => node.contextValue === "ff_git_image.image.failure"),
+  );
+  const picks = imageQuickPicks(
+    git,
+    undefined,
+    tree.leaves().map((node) => node.change),
+  );
+  assert.equal(picks.length, 4);
+  assert(picks.every((pick) => pick.detail.includes("Failure artifact")));
+  const first = tree.leaves()[0];
+  assert.equal(
+    tree.provideFileDecoration(first.resourceUri).color.id,
+    "list.errorForeground",
+  );
+  tree.setFilter("all");
+  assert.equal(tree.count, 5);
 });

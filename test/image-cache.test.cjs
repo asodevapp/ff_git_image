@@ -29,6 +29,11 @@ const vscode = {
     }
   },
   TreeItemCollapsibleState: { Expanded: 2, None: 0 },
+  ThemeColor: class {
+    constructor(id) {
+      this.id = id;
+    }
+  },
   ThemeIcon: class {},
   FileType: { SymbolicLink: 64 },
   Uri: { parse: (value) => uri(value, "metric") },

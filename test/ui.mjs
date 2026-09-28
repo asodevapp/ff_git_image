@@ -87,6 +87,14 @@ const items = [
     status: "Conflict",
     beforeLabel: "Not present",
   },
+  {
+    id: "failure",
+    path: "test/editor/failures/iPhone5S[dark]_testImage.png",
+    scope: "failure",
+    status: "Failure",
+    beforeLabel: "Not present",
+    afterLabel: "Actual · testImage",
+  },
 ].map((item) => ({
   repository: "design-system",
   root: "/workspace/design-system",
@@ -115,6 +123,7 @@ const images = {
   unsafe: [old, fresh],
   "new-staged": [null, fresh],
   "conflict-added": [null, fresh],
+  failure: [null, fresh],
 };
 const server = createServer(async (req, res) => {
   try {
@@ -221,8 +230,9 @@ try {
       };
       window.__responses = 0;
       window.__emit = (data) => window.postMessage(data, "*");
-      window.__snapshot = (selected, changes = items) =>
-        window.__emit({ type: "snapshot", changes, selected });
+      window.__snapshot = (selected, changes = items, filter = "all") =>
+        window.__emit({ type: "snapshot", changes, selected, filter, failureCount: changes.filter(item => item.scope === "failure").length });
+      window.__failureSnapshot = () => window.__snapshot("failure", items.filter(item => item.id === "failure"), "failures");
       window.__selectImage = (id) => window.__snapshot(id);
       window.__revisionSnapshot = () =>
         new Promise((resolve) => {
@@ -1059,6 +1069,28 @@ try {
     await page.locator("#left-canvas").evaluate((canvas) => canvas.width),
     3456,
   );
+  // Raw failures have a single preview and no Git/ignore actions or pixel work.
+  const workersBeforeFailure = await page.evaluate(() => window.__activity.workers);
+  await page.evaluate(() => window.__failureSnapshot());
+  await page.waitForFunction(() => document.querySelector("#new-badge").textContent === "failure" && document.querySelector("#new-badge").checkVisibility());
+  assert.equal(await page.locator("#left-pane").isVisible(), false);
+  assert.equal(await page.locator("#right-pane").isVisible(), true);
+  assert.equal(await page.locator("#comparison-toolbar").isVisible(), false);
+  for (const id of ["stage", "discard", "ignore"]) assert.equal(await page.locator(`#${id}`).isVisible(), false);
+  assert.equal(await page.locator("#right-label").textContent(), "Actual · testImage");
+  assert.match(await page.locator("#context").textContent(), /Generated failure artifact/);
+  assert.equal(await page.locator("#summary").textContent(), "1 failure image");
+  assert.equal(await page.evaluate(() => window.__activity.workers), workersBeforeFailure);
+  assert.deepEqual(await pixel("#right-canvas"), [19, 168, 135, 255]);
+  await page.click("#clean-failures");
+  assert.equal(await page.evaluate(() => window.__messages.at(-1).type), "cleanFailures");
+  await page.screenshot({ path: path.join(root, ".test-host", "failure-image.png") });
+  await page.evaluate(() => window.__snapshot(undefined, [], "failures"));
+  await page.waitForFunction(() => document.querySelector("#empty strong").textContent === "No failure images");
+  assert.equal(await page.locator("#clean-failures").isVisible(), false);
+  await selectFromSidebar("main");
+  assert.equal(await page.locator("#stage").isVisible(), true);
+  assert.equal(await page.locator("#new-badge").isVisible(), false);
   assert.deepEqual(errors, []);
   console.log(
     "PASS: browser UI — full-width new images, saved comparison modes, queued actions with continued navigation and correlated completions, revision-bound actions, previous/next, numeric zoom, Fit Width, double-click, shortcuts, highlight intensity, background counts without redraw, logical scaling, stable refreshes, all modes and responsive layout.",

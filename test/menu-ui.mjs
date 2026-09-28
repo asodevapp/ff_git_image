@@ -47,11 +47,11 @@ const wait = async (name) => {
   }
   throw new Error(`Timed out waiting for ${name}`);
 };
-let browser;
+let browser, page;
 try {
   await wait("ready");
   browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const page = browser
+  page = browser
     .contexts()
     .flatMap((context) => context.pages())
     .find((page) => page.url().includes("workbench"));
@@ -60,6 +60,16 @@ try {
     .getByRole("treeitem")
     .filter({ hasText: "screen0.png" })
     .first();
+  const action = (node, icon) =>
+    node.locator(`.monaco-action-bar .action-label.codicon-${icon}`);
+  const checkActions = async (node, staged = false) => {
+    await node.hover();
+    await action(node, staged ? "remove" : "add").waitFor({ state: "visible" });
+    assert.equal(await action(node, staged ? "add" : "remove").count(), 0);
+    assert.equal(await action(node, "discard").count(), staged ? 0 : 1);
+    if (!staged) assert.ok(await action(node, "discard").isVisible());
+  };
+  await checkActions(row);
   await row.click({ button: "right" });
   const menu = page.locator(".monaco-menu-container");
   await menu.waitFor({ state: "visible" });
@@ -93,6 +103,7 @@ try {
     .getByRole("treeitem")
     .filter({ hasText: "performance" })
     .first();
+  await checkActions(folder);
   await folder.click({ button: "right" });
   await menu.waitFor({ state: "visible" });
   const folderCommands = await menu.innerText();
@@ -109,12 +120,82 @@ try {
     path: path.join(root, ".test-host/menu-folder-stable.png"),
   });
   await page.keyboard.press("Escape");
+  const group = (label) =>
+    page.getByRole("treeitem").filter({
+      has: page
+        .locator(".label-name")
+        .filter({ hasText: new RegExp(`^${label}$`) }),
+    });
+  await checkActions(group("Changes"));
+  await checkActions(group("Staged Changes"), true);
+
+  // Exercise real inline commands, including their row arguments, against the
+  // disposable Git fixture. All staged fixture changes are restored afterward.
+  await row.hover();
+  await action(row, "add").click();
+  const stagedFile = page
+    .getByRole("treeitem")
+    .filter({ hasText: "screen0.png" })
+    .filter({ has: page.locator(".action-label.codicon-remove") });
+  const revealStaged = async (count) => {
+    await group("Staged Changes")
+      .filter({ hasText: String(count) })
+      .waitFor({ state: "visible" });
+    // Native tree rows outside the viewport are virtualized. Staging moves this
+    // image above the current scroll position; navigate there before locating it.
+    await page.getByRole("tree").first().focus();
+    await page.keyboard.press("Home");
+  };
+  await revealStaged(11);
+  await stagedFile.waitFor({ state: "visible", timeout: 15000 });
+  await checkActions(stagedFile, true);
+  await action(stagedFile, "remove").click();
+  await stagedFile.waitFor({ state: "hidden", timeout: 15000 });
+  await checkActions(folder);
+  await action(folder, "add").click();
+  await revealStaged(42);
+  await stagedFile.waitFor({ state: "visible", timeout: 15000 });
+  await checkActions(folder, true);
+  await action(folder, "remove").click();
+  await stagedFile.waitFor({ state: "hidden", timeout: 15000 });
+  await checkActions(folder);
+  await action(folder, "discard").click();
+  await wait("discardCancelled");
+  const confirmation = JSON.parse(
+    await readFile(path.join(control, "discardCancelled"), "utf8"),
+  );
+  assert.equal(confirmation.message, "Discard changes to 32 images?");
+  assert.equal(confirmation.options.modal, true);
+  assert.match(confirmation.options.detail, /performance\/screen0\.png/);
+  assert.match(confirmation.options.detail, /performance\/screen31\.png/);
+  assert.deepEqual(confirmation.buttons, ["Discard Changes"]);
+  await checkActions(row);
+  await page.screenshot({
+    path: path.join(root, ".test-host/inline-actions.png"),
+  });
   await writeFile(path.join(control, "editChecked"), "yes");
   assert.equal(await exited, 0);
   console.log(
-    "PASS: actual VS Code image/folder context menus stay open during Git status updates, pixel results and a real image edit.",
+    "PASS: actual VS Code inline actions on files/folders/groups, file and folder stage/unstage, cancelled folder discard, and stable context menus during Git/pixel updates.",
   );
   console.log(await readFile(path.join(control, "updated"), "utf8"));
+} catch (error) {
+  if (page && !page.isClosed()) {
+    console.error(
+      "Tree at failure:",
+      await page.getByRole("treeitem").allTextContents(),
+    );
+    console.error(
+      "Notifications:",
+      await page.locator(".notifications-toasts").allInnerTexts(),
+    );
+    console.error("Dialogs:", await page.getByRole("dialog").allTextContents());
+    await mkdir(path.join(root, ".test-host"), { recursive: true });
+    await page.screenshot({
+      path: path.join(root, ".test-host/menu-failure.png"),
+    });
+  }
+  throw error;
 } finally {
   await browser?.close().catch(() => {});
   if (child.exitCode === null) child.kill();
